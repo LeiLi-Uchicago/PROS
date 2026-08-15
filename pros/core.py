@@ -164,7 +164,7 @@ def sketch(
         C-contiguous ``float64`` internally.
     n : int
         Target sketch size, in ``(0, N]``.
-    partitioner : {"kmeans", "grid", "none"}, default "kmeans"
+    partitioner : {"kmeans", "pc_tree", "random", "none"}, default "kmeans"
         Stage-1 blocking scheme.  ``"none"`` collapses to a single block,
         which turns PROS into a plain global selection.
     n_blocks : int or "auto", default "auto"
@@ -174,22 +174,22 @@ def sketch(
         the parameter sweep.  Covering radius is nearly flat in this
         parameter, so the choice is a runtime decision; pass an int to
         override.
-    allocator : {"water_filling", "proportional", "volume", "equal"}, default "water_filling"
+    allocator : {"water_filling", "proportional", "power", "volume", "uniform"}, default "water_filling"
         How the pool budget is divided among blocks.
     r : float, default 10.0
         Stage-1 oversampling ratio; the candidate pool holds ``min(r*n, N)``
         points.  ``r=1`` with ``refiner="none"`` recovers one-shot blockwise
         selection.  Quality saturates near ``r=10`` on the data tested.
-    selector : {"fft", "random"}, default "fft"
+    selector : {"fft", "scsampler_maximin", "random"}, default "fft"
         Within-block stage-1 selection rule.
-    refiner : {"fft", "none"}, default "fft"
+    refiner : {"fft", "maximin", "local_swap", "none"}, default "fft"
         Stage-2 global rule.  ``"none"`` disables refinement.
     d_intrinsic : float, optional
         Intrinsic dimension, required only by ``allocator="volume"``.
         Defaults to 5.0 with a warning if unset, since the ambient dimension
         is the wrong value to use there.
     alpha : float, default 0.5
-        Water-filling exponent.
+        Exponent for ``allocator="power"``.
     refine_max_iter : int, default 25
         Cap on stage-2 refinement passes.
     mix : float, default 0.0

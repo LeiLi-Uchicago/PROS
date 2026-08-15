@@ -292,14 +292,18 @@ def make_allocation(
         Number of blocks.
     budget : int
         Total pool size to distribute, i.e. ``min(r * n, N)``.
-    kind : {"water_filling", "proportional", "volume", "equal"}
+    kind : {"proportional", "power", "volume", "uniform"}
         Allocation rule.  ``"proportional"`` follows block population,
-        ``"volume"`` follows estimated block volume (and needs
-        ``d_intrinsic``), ``"water_filling"`` interpolates between them.
+        ``"power"`` follows block population raised to ``alpha``, ``"volume"``
+        follows estimated block volume (and needs ``d_intrinsic``), and
+        ``"uniform"`` spreads budget as evenly as caps allow.  The fused
+        ``"water_filling"`` allocator is handled by :func:`pros.sketch`
+        because it performs allocation and candidate selection together.
     d_intrinsic : float, default 5.0
         Intrinsic dimension estimate, used only by ``"volume"``.
     alpha : float, default 0.5
-        Water-filling exponent: 0 is population-proportional, 1 is volume-led.
+        Exponent for ``"power"`` allocation: 1 is population-proportional and
+        0 is uniform over non-empty blocks.
 
     Returns
     -------

@@ -1,0 +1,17 @@
+site_name: PROS
+site_description: Partitioned and Refined Oversampling Sketches
+repo_url: https://github.com/LeiLi-Uchicago/PROS
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Configuration: configuration.md
+  - Theory: theory.md
+  - API: api.md
+  - Examples: examples.md
+

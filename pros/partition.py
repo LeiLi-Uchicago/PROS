@@ -128,7 +128,7 @@ def make_partition(
     ----------
     X : numpy.ndarray
         ``(N, d)`` coordinates.
-    kind : {"kmeans", "grid", "none"}
+    kind : {"kmeans", "pc_tree", "random", "none"}
         Partitioning scheme.  ``"none"`` returns a single block, which
         reduces PROS to a global method.
     n_blocks : int
