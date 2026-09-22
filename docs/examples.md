@@ -13,6 +13,6 @@ Run an example from the repository root:
 python examples/01_basic_numpy.py
 ```
 
-The checkout examples use `partitioner="pc_tree"` so they can run with just
-NumPy. The installed package declares `scikit-learn` for the default
-`partitioner="kmeans"` workflow.
+The checkout examples use `partitioner="pc_tree"` to keep their behaviour
+simple. The installed package includes `scikit-learn`, which is required by
+the default `partitioner="kmeans"` workflow.

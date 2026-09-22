@@ -83,6 +83,9 @@ class FarthestFirst:
     def _add(self, j: int) -> None:
         d2 = self._sq + self._sq[j] - 2.0 * (self.X @ self.X[j])
         np.maximum(d2, 0.0, out=d2)  # guard against round-off negatives
+        # A selected row is exactly covered by itself. The BLAS identity can
+        # otherwise leave a tiny positive residual when every row is selected.
+        d2[j] = 0.0
         np.minimum(self.mindist2, d2, out=self.mindist2)
         self.selected.append(int(j))
         self.radii.append(float(np.sqrt(self.mindist2.max())))
@@ -220,9 +223,7 @@ def assign_nearest(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Distance to, and index of, the nearest centre for each row of ``X``.
 
-    Exact (brute force, chunked).  Used for covering-radius evaluation, which
-    happens once per benchmark run rather than inside any inner loop, so
-    exactness is preferred over an approximate index.
+    Exact (brute force, chunked) nearest-centre assignment.
     """
     X = np.ascontiguousarray(X, dtype=np.float64)
     C = np.ascontiguousarray(centres, dtype=np.float64)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pros import make_partition
+from pros.partition import make_partition
 
 
 def test_partitioners_return_labels() -> None:
@@ -13,4 +13,3 @@ def test_partitioners_return_labels() -> None:
         assert labels.shape == (80,)
         assert labels.min() == 0
         assert labels.max() < 4
-

@@ -20,14 +20,13 @@ keywords = [
   "coreset",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Typing :: Typed",
@@ -76,7 +75,6 @@ packages = ["pros"]
 [tool.hatch.build.targets.sdist]
 include = [
   "/pros",
-  "/tests",
   "/examples",
   "/data",
   "/docs",
@@ -84,6 +82,13 @@ include = [
   "/LICENSE",
   "/CITATION.cff",
   "/mkdocs.yml",
+]
+
+exclude = [
+  "/test_para/data",
+  "/test_para/results",
+  "/.pytest_cache",
+  "/__pycache__",
 ]
 
 [tool.pytest.ini_options]
@@ -96,4 +101,3 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

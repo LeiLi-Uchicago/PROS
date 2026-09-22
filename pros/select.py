@@ -10,7 +10,6 @@ from __future__ import annotations
 import numpy as np
 
 from .geometry import (
-    FarthestFirst,
     farthest_first,
     farthest_first_seeded,
     sq_norms,

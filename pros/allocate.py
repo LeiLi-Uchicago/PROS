@@ -1,42 +1,8 @@
 """Stage-1 candidate-budget allocators.
 
-Given ``B`` blocks and a total pool budget ``M = r * n``, an allocator decides
-how many candidates ``m_b`` each block contributes.  This module is the
-methodological core of the project, so the reasoning is spelled out.
-
-Why proportional allocation cannot preserve rare populations
-------------------------------------------------------------
-The draft sets ``m_b = r n N_b / N``.  Under that rule a block holding 0.1% of
-cells receives 0.1% of the budget *regardless of how transcriptionally
-distinct it is*.  If a rare population is starved in stage 1 its cells never
-enter the candidate pool, and no amount of stage-2 refinement can recover
-them -- refinement can only choose among candidates it is given.  Proportional
-allocation therefore does not deliver the benefit the draft claims for it.
-
-Water-filling: the allocation that minimises pool covering radius
------------------------------------------------------------------
-The stage-2 guarantee (see ``docs/theory.md``) degrades with ``rho = R(X, P)``,
-the covering radius of the pool.  Since ``rho = max_b R_b``, the right
-objective for stage 1 is to *minimise the largest per-block covering radius*
-subject to ``sum_b m_b = M``.
-
-Model a block's covering radius as ``R_b(m) = C_b m^{-1/d}`` where ``d`` is the
-intrinsic dimension and ``C_b`` a block-specific scale.  Equalising all ``R_b``
-at a common value ``R`` gives ``m_b = (C_b / R)^d``, and summing to ``M``
-yields
-
-    R = (sum_b C_b^d / M)^(1/d),    m_b = M * C_b^d / sum_b C_b^d.
-
-Covering a region of volume ``V_b`` with balls of radius ``R`` needs
-``m ~ V_b / R^d``, so ``C_b = V_b^(1/d)`` and ``C_b^d = V_b``.  The optimal
-allocation is therefore
-
-    m_b  proportional to  V_b        (block *volume*, not block *size*)
-
-which is scale-free in ``N_b``.  A rare but geometrically distinct cluster
-occupies real volume and is funded accordingly; a large but tight cluster is
-not over-funded.  ``allocate_volume`` implements this closed form and
-``water_filling`` implements the exact greedy equivalent.
+An allocator divides a pool budget among blocks. ``water_filling`` combines
+allocation with incremental farthest-first selection, prioritising the block
+with the largest current covering radius.
 """
 
 from __future__ import annotations
@@ -136,7 +102,7 @@ def _block_sizes(labels: np.ndarray, n_blocks: int) -> np.ndarray:
 
 
 def allocate_proportional(labels: np.ndarray, n_blocks: int, budget: int) -> np.ndarray:
-    """``m_b ~ N_b`` -- the rule in the original draft, and scSampler's."""
+    """Allocate candidates in proportion to block size."""
     sizes = _block_sizes(labels, n_blocks)
     return round_to_budget(sizes.astype(np.float64), budget, sizes)
 
@@ -146,9 +112,7 @@ def allocate_power(
 ) -> np.ndarray:
     """``m_b ~ N_b^alpha`` -- interpolates proportional (1) and uniform (0).
 
-    A common heuristic for up-weighting small strata.  Included so the
-    volume-based rule is compared against a tuned size-based rule rather than
-    only against plain proportional allocation.
+    This heuristic up-weights small blocks relative to proportional allocation.
     """
     sizes = _block_sizes(labels, n_blocks)
     w = np.power(sizes.astype(np.float64), float(alpha))
@@ -217,10 +181,6 @@ def water_filling(
     keyed on current covering radius, and repeatedly advances whichever block
     is currently worst-covered.  This greedily minimises ``max_b R_b = rho``
     and needs no dimension estimate or volume proxy.
-
-    Structurally this is Treehopper's priority-queue traversal, but applied to
-    the *stage-1 pool* budget rather than to the final sketch -- which is what
-    makes it composable with a global stage-2 refinement.
 
     Returns ``(pool_indices, m_per_block, info)``.
     """

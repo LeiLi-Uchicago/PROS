@@ -1,25 +1,17 @@
 """Stage-1 partitioners.
 
 Each partitioner maps an ``(N, d)`` array to an integer ``labels`` array of
-length ``N`` taking values in ``0 .. B-1``.  The three schemes correspond to
-the three published design choices we want to separate:
+length ``N`` taking values in ``0 .. B-1``:
 
 ``random``
-    Equal-size random split.  This is what scSampler does in its blocked mode
-    (``scSampler-B<k>``).  Blocks are statistically identical copies of the
-    whole dataset, so every block sees every cell type.
+    Equal-size random split.
 
 ``kmeans``
-    Coarse clustering, the scheme proposed in the user's draft.  Blocks are
-    spatially compact and highly unequal in size.
+    Coarse clustering into spatially compact blocks.
 
 ``pc_tree``
     Recursive median split along the leading principal component of the
-    current node, the scheme used by Treehopper.  Blocks are spatially
-    compact *and* near-equal in size by construction.
-
-Keeping these as swappable components is what makes the partitioner an
-ablation axis rather than a hard-coded decision.
+    current node. Blocks are spatially compact and near-equal in size.
 """
 
 from __future__ import annotations
@@ -30,7 +22,7 @@ __all__ = ["random_blocks", "kmeans_blocks", "pc_tree_blocks", "make_partition"]
 
 
 def random_blocks(n_points: int, n_blocks: int, rng) -> np.ndarray:
-    """Equal-size random partition (scSampler's blocking scheme)."""
+    """Equal-size random partition."""
     labels = np.arange(n_points) % int(n_blocks)
     rng.shuffle(labels)
     return labels.astype(np.int32)
@@ -45,12 +37,7 @@ def kmeans_blocks(
 ) -> np.ndarray:
     """Coarse k-means partition via ``MiniBatchKMeans``.
 
-    ``n_blocks`` is used directly as the number of clusters.  The draft
-    additionally merged clusters into ``B`` balanced blocks; we deliberately do
-    not, because balancing is the allocator's job (see
-    :mod:`pros.allocate`) and merging spatially distant clusters into one
-    block would destroy the compactness that motivates clustering in the first
-    place.
+    ``n_blocks`` is used directly as the number of clusters.
     """
     from sklearn.cluster import MiniBatchKMeans
 
@@ -65,7 +52,7 @@ def kmeans_blocks(
 
 
 def pc_tree_blocks(X: np.ndarray, n_blocks: int) -> np.ndarray:
-    """Recursive median split along the leading PC (Treehopper's scheme).
+    """Recursive median split along the leading principal component.
 
     At each step the *largest* current node is split, so the routine handles
     any ``n_blocks`` rather than only powers of two, and leaf sizes stay

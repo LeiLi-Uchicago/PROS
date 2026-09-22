@@ -20,13 +20,10 @@ compute, *at run time and without knowing the optimum*:
 
 Honest accounting of cost
 -------------------------
-Obtaining ``delta`` requires a farthest-first traversal over the *full* data,
-which costs the same order as running Hopper outright.  Certification is
-therefore an **evaluation instrument, not part of the fast path**, and
-benchmark timings must exclude it -- otherwise the method would be charged for
-work it does not do in production.  :func:`certificate` accordingly reports its
-own cost separately in ``timings``, and :func:`choose_r` provides the cheap
-subsample-based estimate intended for actual use.
+Obtaining ``delta`` requires a farthest-first traversal over the full data.
+Certification is therefore opt-in; its separate costs are reported in
+``timings``. :func:`choose_r` provides a subsampling-based estimate for
+choosing an oversampling ratio.
 """
 
 from __future__ import annotations
@@ -49,7 +46,11 @@ def opt_bounds(X: np.ndarray, n: int, seed: int = 0) -> dict:
     classical 2-approximation.
     """
     X = np.ascontiguousarray(X, dtype=np.float64)
-    n = int(min(n, X.shape[0]))
+    if X.ndim != 2 or X.shape[0] == 0:
+        raise ValueError("X must be a non-empty 2-D array")
+    n = int(n)
+    if not 0 < n <= X.shape[0]:
+        raise ValueError(f"n must be in (0, {X.shape[0]}], got {n}")
     rng = np.random.default_rng(seed)
     state = FarthestFirst(X, rng=rng)
     state.run_to(min(n + 1, X.shape[0]))
@@ -94,17 +95,37 @@ def certificate(
     """
     X = np.ascontiguousarray(X, dtype=np.float64)
     sketch_indices = np.asarray(sketch_indices, dtype=np.int64)
+    if X.ndim != 2 or X.shape[0] == 0:
+        raise ValueError("X must be a non-empty 2-D array")
+    if sketch_indices.ndim != 1 or sketch_indices.size == 0:
+        raise ValueError("sketch_indices must be a non-empty one-dimensional array")
+    if np.any(sketch_indices < 0) or np.any(sketch_indices >= X.shape[0]):
+        raise ValueError("sketch_indices must be valid indices into X")
+    if np.unique(sketch_indices).size != sketch_indices.size:
+        raise ValueError("sketch_indices must not contain duplicates")
+    if pool_indices is not None:
+        pool_indices = np.asarray(pool_indices, dtype=np.int64)
+        if pool_indices.ndim != 1 or pool_indices.size == 0:
+            raise ValueError("pool_indices must be a non-empty one-dimensional array")
+        if np.any(pool_indices < 0) or np.any(pool_indices >= X.shape[0]):
+            raise ValueError("pool_indices must be valid indices into X")
+        if np.unique(pool_indices).size != pool_indices.size:
+            raise ValueError("pool_indices must not contain duplicates")
     n = sketch_indices.size
     timings: dict[str, float] = {}
 
     t0 = time.perf_counter()
     bounds = opt_cache if opt_cache is not None else opt_bounds(X, n, seed=seed)
+    if int(np.asarray(bounds.get("fft_indices", [])).size) != n:
+        raise ValueError(
+            "opt_cache must come from opt_bounds(X, n) for this sketch size"
+        )
     timings["opt_bounds"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     radius = covering_radius(X, X[sketch_indices])
     rho = (
-        covering_radius(X, X[np.asarray(pool_indices, dtype=np.int64)])
+        covering_radius(X, X[pool_indices])
         if pool_indices is not None
         else float("nan")
     )
@@ -123,7 +144,11 @@ def certificate(
         "opt_upper": opt_upper,
         "ratio_upper": ratio_upper,
         "theory_bound": theory_bound,
-        "bound_slack": radius / theory_bound if theory_bound and theory_bound > 0 else float("nan"),
+        "bound_slack": (
+            radius / theory_bound
+            if theory_bound and theory_bound > 0
+            else float("nan")
+        ),
         "rho_over_opt": rho / opt_lower if opt_lower > 0 else float("nan"),
         "timings": timings,
     }
@@ -178,7 +203,9 @@ def choose_r(
     for r in r_grid:
         res = _sketch(X, n, r=float(r), seed=seed, certify=True, **sketch_kwargs)
         rho = float(res["rho"])
-        trajectory.append({"r": float(r), "rho": rho, "ratio": rho / target if target > 0 else np.nan})
+        trajectory.append(
+            {"r": float(r), "rho": rho, "ratio": rho / target if target > 0 else np.nan}
+        )
         if target > 0 and rho <= tol * target:
             chosen = (float(r), res)
             break

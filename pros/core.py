@@ -1,7 +1,6 @@
 """The two-stage sketcher.
 
-``sketch()`` is assembled from four swappable components so that every design
-choice is an ablation axis rather than a hard-coded decision:
+``sketch()`` is assembled from four swappable components:
 
 ===============  =======================================================
 component        options
@@ -13,17 +12,7 @@ component        options
 ``refiner``      ``fft`` | ``maximin`` | ``local_swap`` | ``none``
 ===============  =======================================================
 
-Reference points reachable by configuration:
-
-* ``partitioner='random', allocator='proportional', selector='scsampler_maximin',
-  r=1, refiner='none'``  -> scSampler-B<k>
-* ``partitioner='pc_tree', allocator='water_filling', refiner='none'``
-  -> Treehopper
-* ``partitioner='none', refiner='fft'``  -> plain Hopper / Gonzalez FFT
-
-so the ablation grid contains the published baselines as interior points and
-any advantage of the proposed default is measured against them on identical
-code paths.
+The components can be exchanged without changing the two-stage control flow.
 """
 
 from __future__ import annotations
@@ -34,7 +23,6 @@ import time
 import numpy as np
 
 from .allocate import make_allocation, water_filling
-from .geometry import covering_radius
 from .partition import make_partition
 from .select import make_selector, refine
 
@@ -83,12 +71,7 @@ class SketchResult(dict):
     __getattr__ = dict.__getitem__
 
 
-#: Exponent and prefactor of the runtime-optimal block-count rule,
-#: ``B* = C * N**BETA``, fitted to the runtime-optimal block count measured
-#: at N in {10k, 50k, 200k, 800k} (results/param_sweep.csv, 360 runs).
-#: Covering radius is nearly flat in block count over this grid -- the spread
-#: across block counts is only ~3x the seed-to-seed SD -- so the block count
-#: is chosen to minimise runtime, not quality.
+#: Empirical block-count rule used by ``n_blocks="auto"``.
 AUTO_BLOCKS_BETA = 0.62
 AUTO_BLOCKS_C = 0.0924
 AUTO_BLOCKS_MIN = 8
@@ -96,7 +79,7 @@ AUTO_BLOCKS_MAX = 1024
 
 
 def auto_n_blocks(n_cells: int) -> int:
-    """Runtime-optimal block count for a population of ``n_cells`` points.
+    """Empirical block-count rule for a population of ``n_cells`` points.
 
     Parameters
     ----------
@@ -107,13 +90,6 @@ def auto_n_blocks(n_cells: int) -> int:
     -------
     int
         Block count, clipped to ``[8, 1024]``.  Never exceeds ``n_cells``.
-
-    Notes
-    -----
-    The fixed default of 128 blocks was tuned at one population size.  It
-    costs 2.6x runtime at ``N = 10,000`` (where 32 blocks is optimal) and
-    1.6x at ``N = 800,000`` (where 512 is), for a covering radius that
-    differs by less than one seed-to-seed standard deviation either way.
 
     Examples
     --------
@@ -168,18 +144,16 @@ def sketch(
         Stage-1 blocking scheme.  ``"none"`` collapses to a single block,
         which turns PROS into a plain global selection.
     n_blocks : int or "auto", default "auto"
-        Number of stage-1 blocks.  More blocks means cheaper stage 1 and a
-        coarser pool.  ``"auto"`` applies :func:`auto_n_blocks`, which scales
-        the block count as ``N**0.62`` -- the runtime-optimal rule fitted in
-        the parameter sweep.  Covering radius is nearly flat in this
-        parameter, so the choice is a runtime decision; pass an int to
-        override.
-    allocator : {"water_filling", "proportional", "power", "volume", "uniform"}, default "water_filling"
+        Number of stage-1 blocks. ``"auto"`` applies
+        :func:`auto_n_blocks`; an explicit value larger than ``N`` is clipped
+        to ``N``.
+    allocator : {"water_filling", "proportional", "power", "volume", "uniform"},
+        default "water_filling"
         How the pool budget is divided among blocks.
     r : float, default 10.0
         Stage-1 oversampling ratio; the candidate pool holds ``min(r*n, N)``
-        points.  ``r=1`` with ``refiner="none"`` recovers one-shot blockwise
-        selection.  Quality saturates near ``r=10`` on the data tested.
+        points. ``r=1`` with ``refiner="none"`` performs one-shot blockwise
+        selection.
     selector : {"fft", "scsampler_maximin", "random"}, default "fft"
         Within-block stage-1 selection rule.
     refiner : {"fft", "maximin", "local_swap", "none"}, default "fft"
@@ -289,6 +263,7 @@ def sketch(
         resolved_blocks = int(n_blocks)
         if resolved_blocks < 1:
             raise ValueError(f"n_blocks must be >= 1, got {resolved_blocks}")
+        resolved_blocks = min(resolved_blocks, n_cells)
     effective_blocks = 1 if partitioner == "none" else resolved_blocks
     labels = make_partition(X, partitioner, effective_blocks, rng)
     n_blocks_actual = int(labels.max()) + 1
@@ -343,16 +318,8 @@ def sketch(
         pool_indices = np.unique(np.concatenate([pool_indices, extra]))
 
     # ---- hybrid reserve ------------------------------------------------
-    # ``mix`` reserves floor(mix*n) of the budget for a uniform draw.  Where
-    # that draw comes from matters: refine() draws from the POOL, which is a
-    # density-proportional sample of the data only when the pool has saturated
-    # (r*n >= N).  At 68k cells with r=10 and n=10k the pool IS the whole
-    # dataset, so pool-uniform == data-uniform; at 1.29M it is a diversified
-    # 10% subset that already over-represents sparse regions, and a pool-uniform
-    # reserve inherits that bias.  ``mix_source="data"`` draws uniformly over
-    # all N cells and adds the draw to the candidate set, so the reserve is
-    # genuinely density-proportional at any N.  Proposition 2 applies either
-    # way -- it assumes nothing about where the seeds come from.
+    # ``mix_source="data"`` puts uniformly drawn full-data reserve points in
+    # the pool before stage 2; ``mix_source="pool"`` draws its reserve there.
     mix_seeds = None
     if mix > 0.0 and mix_source == "data":
         k = int(round(mix * n))

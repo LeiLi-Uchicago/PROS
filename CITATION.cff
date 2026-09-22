@@ -2,11 +2,16 @@ cff-version: 1.2.0
 title: "PROS: Partitioned and Refined Oversampling Sketches"
 message: "If you use PROS in your work, please cite this software."
 type: software
+abstract: "A Python package for partitioned, oversampled, and globally refined geometric data sketches."
 authors:
   - family-names: Li
     given-names: Lei
 repository-code: "https://github.com/LeiLi-Uchicago/PROS"
 license: MIT
+keywords:
+  - geometric sketching
+  - representative sampling
+  - k-center
+  - coreset
 version: 0.1.0
 date-released: 2026-08-15
-

@@ -1,88 +1,96 @@
 # PROS
 
-PROS is a Python package for **P**artitioned and **R**efined **O**versampling
-**S**ketches: fast, diversity-preserving geometric sketches of large coordinate
-matrices.
+PROS (Partitioned and Refined Oversampling Sketches) selects a small,
+diversity-preserving subset of rows from a large real-valued coordinate matrix.
+It builds an oversampled candidate pool within partitions and performs one
+global refinement pass over that pool. The returned subset is represented by
+indices into the original matrix.
 
-The package was designed for reduced single-cell embeddings such as PCA
-coordinates, but the core algorithm works on any real-valued `numpy` matrix.
-It returns representative row indices and, when requested, a run-time
-certificate for the k-center covering objective.
+The package is domain-agnostic. It can be used with reduced single-cell
+embeddings, as well as other feature matrices where Euclidean distance is a
+meaningful geometry.
 
 ## Installation
 
-From a local checkout:
+PROS requires Python 3.10 or newer.
 
 ```bash
 python -m pip install -e .
 ```
 
-With optional AnnData support:
+Optional AnnData support:
 
 ```bash
 python -m pip install -e ".[adata]"
 ```
 
-For development:
+For testing and linting:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-## Quick Start
+## Quick start
 
 ```python
 import numpy as np
 from pros import sketch
 
-rng = np.random.default_rng(0)
-X = rng.random((5000, 50))
+X = np.random.default_rng(0).random((5_000, 50))
+result = sketch(X, n=500, seed=0)
 
-res = sketch(X, n=500, seed=0)
-print(res.indices.shape)
-print(res.timings)
+indices = result.indices
+X_sketch = X[indices]
+print(result.timings)
 ```
 
-`res.indices` is an integer array into the original matrix `X`.
+`result.indices` is a sorted, unique `int64` array of length `n`. By default,
+PROS uses k-means partitioning, water-filling allocation, an oversampling ratio
+of `r=10.0`, and global farthest-first refinement. Pass an explicit `seed` to
+make a stochastic configuration reproducible.
 
-## Certified Runs
+## Certification
 
-Certification computes the sketch covering radius, the pool covering radius,
-and a proven upper bound on the approximation ratio. It is useful for
-evaluation and reporting, but it performs extra full-data passes and should not
-be included in fast-path timing.
+Set `certify=True` to compute the final covering radius, the candidate-pool
+radius, and bounds derived from a full-data farthest-first traversal:
 
 ```python
-res = sketch(X, n=500, certify=True, seed=0)
+result = sketch(X, n=500, seed=0, certify=True)
 
-print(res.radius)
-print(res.rho)
-print(res.ratio_upper)
+print(result.radius)       # R(X, S): final covering radius
+print(result.rho)          # R(X, P): candidate-pool covering radius
+print(result.opt_lower)    # lower bound on the optimal n-centre radius
+print(result.ratio_upper)  # upper bound on R(X, S) / OPT_n(X)
 ```
+
+Certification performs additional full-data work and is not included in
+`result.timings["total"]`. Degenerate data may have `opt_lower == 0`; in that
+case a finite approximation-ratio bound is not defined.
+
+For an existing set of indices, use `pros.certificate`. `pros.opt_bounds`,
+`pros.estimate_opt_scale`, and `pros.choose_r` are available for certificate
+and oversampling-ratio workflows.
 
 ## AnnData
 
 ```python
 from pros import sketch_adata
 
-res = sketch_adata(adata, n=5000, use_rep="X_pca", certify=True)
-subset = adata[res.indices]
+result = sketch_adata(adata, n=5_000, use_rep="X_pca", seed=0)
+subset = adata[result.indices].copy()
 ```
 
-`sketch_adata` also accepts a path to an `.h5ad` file and reads it in backed
-mode so the embedding can be sketched without loading the full count matrix.
+`sketch_adata` also accepts an `.h5ad` path and reads it in backed mode before
+extracting the requested representation.
 
 ## Configuration
 
-The main entry point is:
-
 ```python
-from pros import sketch
-
-res = sketch(
+result = sketch(
     X,
-    n=1000,
+    n=1_000,
     partitioner="kmeans",
+    n_blocks="auto",
     allocator="water_filling",
     r=10.0,
     selector="fft",
@@ -91,29 +99,31 @@ res = sketch(
 )
 ```
 
-Common knobs:
+The `partitioner`, within-partition `selector`, `allocator`, and global
+`refiner` are modular. See [`docs/configuration.md`](docs/configuration.md) for
+the supported values and [`docs/theory.md`](docs/theory.md) for the covering
+objective and certificate definitions.
 
-- `n`: final sketch size.
-- `r`: oversampling ratio; the stage-1 pool has up to `r * n` candidates.
-- `n_blocks`: `"auto"` by default, or an explicit block count.
-- `partitioner`: `"kmeans"`, `"pc_tree"`, `"random"`, or `"none"`.
-- `allocator`: `"water_filling"`, `"proportional"`, `"power"`, `"volume"`, or
-  `"uniform"`.
-- `certify`: add a near-optimality certificate to the result.
+## Repository layout
 
-## Examples
+- `pros/`: installable library code.
+- `tests/`: automated package tests.
+- `examples/`: small runnable examples using synthetic data in `data/`.
+- `test_para/`: standalone parameter experiments and their generated outputs;
+  this reproduction material is intentionally not packaged with the library.
+- `docs/`: MkDocs source pages.
 
-Runnable examples live in `examples/`:
+Run the examples from the repository root after installation:
 
 ```bash
 python examples/01_basic_numpy.py
 python examples/03_certification.py
 ```
 
-The tiny dataset in `data/synthetic_clusters.npz` is synthetic and intended
-only for documentation, tests, and smoke runs.
+## Citation
+
+See [`CITATION.cff`](CITATION.cff) for software citation metadata.
 
 ## License
 
-MIT License. See `LICENSE`.
-
+PROS is distributed under the [MIT License](LICENSE).

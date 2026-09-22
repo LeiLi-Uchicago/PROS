@@ -1,0 +1,232 @@
+---
+title: "Gonzalez Initialization Sensitivity"
+author: "PROS parameter experiment"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.width = 7,
+  fig.height = 4.5,
+  dpi = 300
+)
+
+required_packages <- c("ggplot2", "dplyr", "readr", "scales", "knitr")
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages) > 0) {
+  stop(
+    "Missing R package(s): ",
+    paste(missing_packages, collapse = ", "),
+    "\nInstall with: install.packages(c(",
+    paste(sprintf('\"%s\"', missing_packages), collapse = ", "),
+    "))"
+  )
+}
+
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(scales)
+library(knitr)
+
+base_dir <- dirname('/Users/leili/Documents/GitHub/PROS/test_para/results/gonzalez_init_runs.csv')
+if (is.na(base_dir) || base_dir == "") {
+  base_dir <- getwd()
+}
+
+runs_path <- file.path(base_dir, "gonzalez_init_runs.csv")
+runs <- read_csv(runs_path, show_col_types = FALSE) |>
+  mutate(
+    dataset = factor(
+      dataset,
+      levels = c("balanced_clusters", "imbalanced_clusters"),
+      labels = c("Balanced clusters", "Imbalanced clusters")
+    )
+  )
+
+summary_tbl <- runs |>
+  group_by(dataset, n) |>
+  summarise(
+    num_seeds = n(),
+    delta_mean = mean(delta),
+    delta_sd = sd(delta),
+    delta_cv = delta_sd / delta_mean,
+    delta_min = min(delta),
+    delta_max = max(delta),
+    delta_range = delta_max - delta_min,
+    delta_range_ratio = delta_max / delta_min,
+    opt_lower_mean = mean(opt_lower),
+    opt_lower_sd = sd(opt_lower),
+    opt_lower_cv = opt_lower_sd / opt_lower_mean,
+    opt_lower_min = min(opt_lower),
+    opt_lower_max = max(opt_lower),
+    opt_lower_range = opt_lower_max - opt_lower_min,
+    opt_lower_range_ratio = opt_lower_max / opt_lower_min,
+    .groups = "drop"
+  )
+
+theme_paper <- theme_classic(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 11),
+    plot.title = element_text(face = "bold", size = 13),
+    strip.background = element_rect(fill = "grey92", colour = NA),
+    strip.text = element_text(face = "bold", size = 11)
+  )
+
+save_plot <- function(plot, filename, width = 7, height = 4.5) {
+  ggsave(file.path(base_dir, paste0(filename, ".pdf")), plot, width = width, height = height)
+  ggsave(
+    file.path(base_dir, paste0(filename, ".png")),
+    plot,
+    width = width,
+    height = height,
+    dpi = 600
+  )
+}
+```
+
+## Summary
+
+```{r summary-table}
+summary_tbl |>
+  mutate(
+    delta_mean = round(delta_mean, 4),
+    delta_sd = round(delta_sd, 4),
+    delta_cv = percent(delta_cv, accuracy = 0.01),
+    delta_min = round(delta_min, 4),
+    delta_max = round(delta_max, 4),
+    delta_range = round(delta_range, 4),
+    delta_range_ratio = round(delta_range_ratio, 4),
+    opt_lower_mean = round(opt_lower_mean, 4),
+    opt_lower_sd = round(opt_lower_sd, 4),
+    opt_lower_cv = percent(opt_lower_cv, accuracy = 0.01)
+  ) |>
+  kable(caption = "Gonzalez initialization sensitivity across 20 random seeds.")
+```
+
+## Figure 1: Distribution of Gonzalez Hop Distance
+
+This figure shows the seed-to-seed variation in `delta`, the final hop
+distance from a Gonzalez traversal to `n + 1` points. Since
+`opt_lower = delta / 2`, relative variation in `delta` is identical to
+relative variation in the certified lower bound.
+
+```{r delta-distribution}
+p_delta <- ggplot(runs, aes(x = dataset, y = delta, colour = dataset)) +
+  geom_boxplot(width = 0.42, outlier.shape = NA, linewidth = 0.45) +
+  geom_point(
+    position = position_jitter(width = 0.08, height = 0, seed = 1),
+    size = 2.1,
+    alpha = 0.82
+  ) +
+  labs(
+    title = "Gonzalez initialization sensitivity",
+    x = NULL,
+    y = expression(delta)
+  ) +
+  theme_paper
+
+p_delta
+save_plot(p_delta, "fig_gonzalez_delta_distribution")
+```
+
+## Figure 2: Seed-Level Values
+
+```{r delta-by-seed}
+p_seed <- ggplot(runs, aes(x = seed, y = delta, colour = dataset)) +
+  geom_line(linewidth = 0.45, alpha = 0.8) +
+  geom_point(size = 1.8) +
+  facet_wrap(~ dataset, scales = "free_y") +
+  scale_x_continuous(breaks = seq(0, 19, by = 2)) +
+  labs(
+    title = "Seed-level Gonzalez hop distance",
+    x = "Initialization seed",
+    y = expression(delta)
+  ) +
+  theme_paper
+
+p_seed
+save_plot(p_seed, "fig_gonzalez_delta_by_seed")
+```
+
+## Figure 3: Certified Lower Bound
+
+```{r opt-lower-distribution}
+p_opt <- ggplot(runs, aes(x = dataset, y = opt_lower, colour = dataset)) +
+  geom_boxplot(width = 0.42, outlier.shape = NA, linewidth = 0.45) +
+  geom_point(
+    position = position_jitter(width = 0.08, height = 0, seed = 2),
+    size = 2.1,
+    alpha = 0.82
+  ) +
+  labs(
+    title = "Certified lower bound across Gonzalez initializations",
+    x = NULL,
+    y = expression(OPT[n] >= delta / 2)
+  ) +
+  theme_paper
+
+p_opt
+save_plot(p_opt, "fig_gonzalez_opt_lower_distribution")
+```
+
+## Text for Manuscript
+
+```{r manuscript-text, results='asis'}
+balanced <- summary_tbl |> filter(dataset == "Balanced clusters")
+imbalanced <- summary_tbl |> filter(dataset == "Imbalanced clusters")
+
+cat(sprintf(
+  paste0(
+    "For the balanced synthetic dataset, the Gonzalez-derived packing distance ",
+    "was highly stable across 20 random initializations at n = %d ",
+    "(mean delta = %.4f, SD = %.4f, CV = %.2f%%; range %.4f-%.4f).\\n\\n"
+  ),
+  balanced$n,
+  balanced$delta_mean,
+  balanced$delta_sd,
+  100 * balanced$delta_cv,
+  balanced$delta_min,
+  balanced$delta_max
+))
+
+cat(sprintf(
+  paste0(
+    "For the imbalanced synthetic dataset, initialization sensitivity remained ",
+    "small despite stronger heterogeneity ",
+    "(mean delta = %.4f, SD = %.4f, CV = %.2f%%; range %.4f-%.4f).\\n\\n"
+  ),
+  imbalanced$delta_mean,
+  imbalanced$delta_sd,
+  100 * imbalanced$delta_cv,
+  imbalanced$delta_min,
+  imbalanced$delta_max
+))
+
+cat(sprintf(
+  paste0(
+    "Because opt_lower is defined as delta / 2, the same relative stability ",
+    "holds for the certified lower bound: CV = %.2f%% for the balanced dataset ",
+    "and %.2f%% for the imbalanced dataset. These results indicate that the ",
+    "reported lower-bound certificate is not materially driven by the arbitrary ",
+    "initial Gonzalez seed in these representative settings.\\n"
+  ),
+  100 * balanced$opt_lower_cv,
+  100 * imbalanced$opt_lower_cv
+))
+```
+

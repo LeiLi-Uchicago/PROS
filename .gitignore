@@ -1,21 +1,16 @@
-.DS_Store
 __pycache__/
 *.py[cod]
-*$py.class
-
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
 .coverage
 htmlcov/
-
-.venv/
-venv/
-env/
-
 build/
 dist/
 *.egg-info/
+.venv/
 
-site/
-
+# Generated parameter-experiment artifacts are reproducible locally.
+test_para/data/*.npz
+test_para/results/*.csv
+test_para/results/*.md
+test_para/results/*.html
