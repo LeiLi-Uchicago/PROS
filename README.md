@@ -12,7 +12,8 @@ meaningful geometry.
 
 ## Installation
 
-PROS requires Python 3.10 or newer.
+PROS requires Python 3.10 or newer. The distribution name is `pros-sketch`;
+the Python import remains `pros`. The commands below install this checkout.
 
 ```bash
 python -m pip install -e .
@@ -127,3 +128,27 @@ See [`CITATION.cff`](CITATION.cff) for software citation metadata.
 ## License
 
 PROS is distributed under the [MIT License](LICENSE).
+
+## Validated behavior and limits
+
+- Water-filling is fused with FFT and requires `selector="fft"`. Choose another
+  allocator to use random or scSampler selection. Missing or broken scSampler
+  installations raise an error; no alternate algorithm is substituted.
+- `mix>0` currently requires `refiner="fft"` so reserved points are retained.
+  `refiner="none"` uniformly downsamples the candidate pool to `n` rows.
+- `certificate` computes the a posteriori ratio for any valid sketch. Its
+  `theory_bound` and `bound_slack` are NaN unless FFT refinement is explicitly
+  asserted; `sketch` sets this assertion only for unmixed FFT refinement.
+  Caches are tied to the exact data and sketch size. Floating-point results
+  are numerical bounds, not interval-arithmetic certificates.
+- Internal stage timings exclude input conversion, validation, AnnData I/O,
+  and certification. Measure an external wall clock for runtime comparisons.
+- `sketch_adata(..., return_adata=True, copy=False)` returns an in-memory view
+  without attaching metadata. Backed subset returns require `copy=True`.
+  Sparse `use_rep="X"` is rejected; supply a dense reduced embedding instead.
+- Distances use SciPy directly and nearest-center evaluation tiles both axes.
+  Full input and block copies still require memory proportional to `N*d`;
+  optional swap refiners may allocate much larger matrices.
+
+After installing development dependencies, run `python -m pytest`. Install
+`.[dev,adata]` to include the optional AnnData integration regression test.

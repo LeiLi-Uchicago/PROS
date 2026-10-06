@@ -28,13 +28,21 @@ choosing an oversampling ratio.
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 import numpy as np
 
+from ._validation import indices, integer, matrix
 from .geometry import FarthestFirst, covering_radius
 
 __all__ = ["certificate", "opt_bounds", "choose_r", "estimate_opt_scale"]
+
+
+def _fingerprint(X):
+    digest = hashlib.sha256(str(X.shape).encode())
+    digest.update(memoryview(X).cast("B"))
+    return digest.hexdigest()
 
 
 def opt_bounds(X: np.ndarray, n: int, seed: int = 0) -> dict:
@@ -45,10 +53,10 @@ def opt_bounds(X: np.ndarray, n: int, seed: int = 0) -> dict:
     traversal these two numbers differ by exactly a factor of two, which is the
     classical 2-approximation.
     """
-    X = np.ascontiguousarray(X, dtype=np.float64)
+    X = matrix(X)
     if X.ndim != 2 or X.shape[0] == 0:
         raise ValueError("X must be a non-empty 2-D array")
-    n = int(n)
+    n = integer(n, "n", minimum=1, maximum=len(X))
     if not 0 < n <= X.shape[0]:
         raise ValueError(f"n must be in (0, {X.shape[0]}], got {n}")
     rng = np.random.default_rng(seed)
@@ -61,6 +69,7 @@ def opt_bounds(X: np.ndarray, n: int, seed: int = 0) -> dict:
     # is the minimum pairwise distance among the n+1 selected points.
     delta = radius_n
     return {
+        "data_fingerprint": _fingerprint(X),
         "opt_lower": delta / 2.0,
         "opt_upper": radius_n,
         "fft_radius_n": radius_n,
@@ -75,6 +84,8 @@ def certificate(
     pool_indices: np.ndarray | None = None,
     seed: int = 0,
     opt_cache: dict | None = None,
+    *,
+    assume_fft_refinement: bool = False,
 ) -> dict:
     """Full certificate for one sketch.
 
@@ -90,11 +101,14 @@ def certificate(
     dict
         ``radius``, ``rho``, ``opt_lower``, ``opt_upper``, ``ratio_upper``
         (certified), ``theory_bound`` (``2*opt_upper + 3*rho``),
-        ``bound_slack`` (``radius / theory_bound``; < 1 means the run beat its
-        own worst-case guarantee), and ``timings``.
+        ``bound_slack`` (``radius / theory_bound``), and ``timings``.
+        The theory fields are NaN unless assume_fft_refinement=True. This
+        flag asserts unseeded FFT on the supplied pool; it is not verified
+        from arbitrary user-provided indices. ratio_upper is independent of it.
+        Floating-point distances are numerical estimates, not interval-certified bounds.
     """
-    X = np.ascontiguousarray(X, dtype=np.float64)
-    sketch_indices = np.asarray(sketch_indices, dtype=np.int64)
+    X = matrix(X)
+    sketch_indices = indices(sketch_indices, len(X), "sketch_indices")
     if X.ndim != 2 or X.shape[0] == 0:
         raise ValueError("X must be a non-empty 2-D array")
     if sketch_indices.ndim != 1 or sketch_indices.size == 0:
@@ -104,7 +118,9 @@ def certificate(
     if np.unique(sketch_indices).size != sketch_indices.size:
         raise ValueError("sketch_indices must not contain duplicates")
     if pool_indices is not None:
-        pool_indices = np.asarray(pool_indices, dtype=np.int64)
+        pool_indices = indices(pool_indices, len(X), "pool_indices")
+        if not np.isin(sketch_indices, pool_indices).all():
+            raise ValueError("sketch must be a subset of pool_indices")
         if pool_indices.ndim != 1 or pool_indices.size == 0:
             raise ValueError("pool_indices must be a non-empty one-dimensional array")
         if np.any(pool_indices < 0) or np.any(pool_indices >= X.shape[0]):
@@ -120,6 +136,10 @@ def certificate(
         raise ValueError(
             "opt_cache must come from opt_bounds(X, n) for this sketch size"
         )
+    if bounds.get("data_fingerprint") != _fingerprint(X):
+        raise ValueError(
+            "opt_cache belongs to different data or an older unsupported format"
+        )
     timings["opt_bounds"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -133,8 +153,16 @@ def certificate(
 
     opt_lower = float(bounds["opt_lower"])
     opt_upper = float(bounds["opt_upper"])
-    ratio_upper = radius / opt_lower if opt_lower > 0 else float("nan")
-    theory_bound = 2.0 * opt_upper + 3.0 * rho if np.isfinite(rho) else float("nan")
+    ratio_upper = (
+        radius / opt_lower
+        if opt_lower > 0
+        else (float("inf") if radius > 0 else float("nan"))
+    )
+    theory_bound = (
+        2.0 * opt_upper + 3.0 * rho
+        if assume_fft_refinement and np.isfinite(rho)
+        else float("nan")
+    )
 
     return {
         "n": n,
@@ -145,9 +173,7 @@ def certificate(
         "ratio_upper": ratio_upper,
         "theory_bound": theory_bound,
         "bound_slack": (
-            radius / theory_bound
-            if theory_bound and theory_bound > 0
-            else float("nan")
+            radius / theory_bound if theory_bound and theory_bound > 0 else float("nan")
         ),
         "rho_over_opt": rho / opt_lower if opt_lower > 0 else float("nan"),
         "timings": timings,
@@ -166,6 +192,9 @@ def estimate_opt_scale(
     subsample's covering radius understates the full data's, this is biased low
     and is only used to set a stopping threshold in :func:`choose_r`.
     """
+    X = matrix(X)
+    n = integer(n, "n", minimum=1, maximum=len(X))
+    subsample = integer(subsample, "subsample", minimum=1)
     rng = np.random.default_rng(seed)
     n_cells = X.shape[0]
     if n_cells > subsample:
@@ -197,24 +226,48 @@ def choose_r(
     """
     from .core import sketch as _sketch
 
+    X = matrix(X)
+    n = integer(n, "n", minimum=1, maximum=len(X))
+    if not np.isfinite(tol) or tol < 0:
+        raise ValueError("tol must be finite and nonnegative")
+    r_grid = tuple(float(r) for r in r_grid)
+    if not r_grid or any(not np.isfinite(r) or r < 1 for r in r_grid):
+        raise ValueError("r_grid must contain finite ratios >= 1")
+    if any(a >= b for a, b in zip(r_grid, r_grid[1:], strict=False)):
+        raise ValueError("r_grid must be strictly increasing")
+    if {"r", "certify"} & sketch_kwargs.keys():
+        raise ValueError("choose_r controls r and certify")
     target = estimate_opt_scale(X, n, seed=seed)
     trajectory = []
-    chosen = None
+    accepted = False
     for r in r_grid:
-        res = _sketch(X, n, r=float(r), seed=seed, certify=True, **sketch_kwargs)
-        rho = float(res["rho"])
+        res = _sketch(X, n, r=r, seed=seed, certify=False, **sketch_kwargs)
+        rho = covering_radius(X, X[res.pool_indices])
         trajectory.append(
-            {"r": float(r), "rho": rho, "ratio": rho / target if target > 0 else np.nan}
+            {"r": r, "rho": rho, "ratio": rho / target if target > 0 else np.nan}
         )
-        if target > 0 and rho <= tol * target:
-            chosen = (float(r), res)
+        if rho <= tol * target:
+            accepted = True
             break
-    if chosen is None:
-        chosen = (float(r_grid[-1]), res)
+    # Only certify the final returned sketch, not every trial.
+    cert = certificate(
+        X,
+        res.indices,
+        pool_indices=res.pool_indices,
+        seed=seed,
+        assume_fft_refinement=(
+            res.config["refiner"] == "fft" and res.config["mix"] == 0
+        ),
+    )
+    cert_times = cert.pop("timings")
+    res.update(cert)
+    res.timings.update({"certify_" + k: v for k, v in cert_times.items()})
+    res.config["certify"] = True
     return {
-        "r": chosen[0],
-        "sketch": chosen[1],
+        "r": r,
+        "sketch": res,
         "target_radius": target,
         "trajectory": trajectory,
         "tol": tol,
+        "tolerance_met": accepted,
     }

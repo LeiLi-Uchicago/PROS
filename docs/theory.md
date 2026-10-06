@@ -21,3 +21,19 @@ When `certify=True`, PROS computes:
 Certification requires extra full-data passes and is best treated as an
 evaluation instrument rather than part of the production fast path.
 
+
+
+### Preconditions and numerical interpretation
+
+The a posteriori `ratio_upper` applies to any valid sketch when its optimal-radius
+cache was generated for the same data and sketch size. Data fingerprints reject
+foreign and legacy caches. If the lower bound is zero, the ratio is infinity
+for a positive radius and NaN when both are zero.
+
+The pool-based `theory_bound = 2*opt_upper + 3*rho` requires an unmixed FFT
+refinement over the pool. Direct `certificate` calls leave this field and
+`bound_slack` as NaN unless `assume_fft_refinement=True` is explicitly asserted.
+The assertion is the caller's responsibility; `sketch` sets it only when its
+configuration satisfies the precondition. The sketch must belong to the pool.
+These computations use floating-point Euclidean distances, not formally
+rounded interval arithmetic.

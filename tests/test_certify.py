@@ -29,7 +29,8 @@ def test_opt_bounds_and_certificate_are_valid_against_exact_small_problem() -> N
     assert bounds["opt_upper"] >= optimum - 1e-12
     assert cert["ratio_upper"] >= cert["radius"] / optimum - 1e-12
     assert cert["rho"] == 0.0
-    assert cert["theory_bound"] >= cert["radius"]
+    # Arbitrary indices do not establish the FFT refinement precondition.
+    assert np.isnan(cert["theory_bound"])
 
 
 def test_certificate_accepts_reusable_matching_cache() -> None:

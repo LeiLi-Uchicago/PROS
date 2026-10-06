@@ -7,13 +7,18 @@ into the array they were given, so the caller owns index bookkeeping.
 
 from __future__ import annotations
 
-import numpy as np
+import threading
 
+import numpy as np
+from scipy.spatial.distance import cdist
+
+from ._validation import indices
 from .geometry import (
     farthest_first,
     farthest_first_seeded,
-    sq_norms,
 )
+
+_SCSAMPLER_LOCK = threading.Lock()
 
 __all__ = [
     "select_fft",
@@ -41,35 +46,37 @@ def select_random(X: np.ndarray, m: int, rng) -> np.ndarray:
 
 
 def select_scsampler(X: np.ndarray, m: int, rng) -> np.ndarray:
-    """scSampler's maximin selection, delegating to the upstream package.
+    """Run upstream scSampler; missing/broken dependencies never change algorithms.
 
-    Falls back to FFT plus a maximin swap pass when ``scsampler`` is not
-    importable, so the pipeline remains runnable without it.  The fallback is
-    reported by :func:`make_selector` callers via the returned ``info`` so a
-    silent substitution never goes unrecorded.
+    The upstream function uses NumPy's legacy global RNG. Calls through this
+    adapter are serialized and restore that state; concurrent external users
+    of the same legacy RNG still require process-level isolation.
     """
     m = min(int(m), X.shape[0])
     if m <= 0:
         return np.empty(0, dtype=np.int64)
     try:
-        import scsampler as _scsampler
-
-        # Upstream accepts a plain array and returns selected indices when
-        # asked not to copy the data.  Signature differs across releases, so
-        # try the documented keyword first and degrade gracefully.
-        out = _scsampler.scsampler(
-            np.ascontiguousarray(X, dtype=np.float64),
-            n_obs=m,
-            copy=False,
-            random_split=1,
-        )
-        idx = np.asarray(out, dtype=np.int64).ravel()
-        if idx.size != m:
-            raise ValueError(f"scsampler returned {idx.size} indices, expected {m}")
-        return idx
-    except Exception:
-        idx = farthest_first(X, m, rng=rng)
-        return maximin_swap(X, idx, max_iter=10)
+        import scsampler as upstream
+    except ImportError as exc:
+        raise ImportError(
+            "scsampler_maximin requires a working scsampler installation"
+        ) from exc
+    with _SCSAMPLER_LOCK:
+        saved = np.random.get_state()
+        try:
+            out = upstream.scsampler(
+                np.ascontiguousarray(X, dtype=np.float64),
+                n_obs=m,
+                copy=False,
+                random_split=1,
+                random_state=int(rng.integers(np.iinfo(np.int32).max)),
+            )
+        finally:
+            np.random.set_state(saved)
+    idx = indices(out, len(X), "scsampler output")
+    if idx.size != m:
+        raise ValueError(f"scsampler returned {idx.size} indices, expected {m}")
+    return idx
 
 
 def make_selector(kind: str):
@@ -99,7 +106,6 @@ def assign_two_nearest(
     X = np.ascontiguousarray(X, dtype=np.float64)
     C = np.ascontiguousarray(centres, dtype=np.float64)
     n_c = C.shape[0]
-    c_sq = sq_norms(C)
     n = X.shape[0]
     d1 = np.empty(n, dtype=np.float64)
     a1 = np.empty(n, dtype=np.int64)
@@ -108,8 +114,7 @@ def assign_two_nearest(
     for start in range(0, n, chunk):
         stop = min(start + chunk, n)
         block = X[start:stop]
-        dd = c_sq[None, :] - 2.0 * (block @ C.T)
-        dd += sq_norms(block)[:, None]
+        dd = cdist(block, C, metric="sqeuclidean")
         np.maximum(dd, 0.0, out=dd)
         if n_c == 1:
             a1[start:stop] = 0
@@ -145,8 +150,7 @@ def maximin_swap(X: np.ndarray, idx: np.ndarray, max_iter: int = 10) -> np.ndarr
 
     for _ in range(int(max_iter)):
         S = X[idx]
-        s_sq = sq_norms(S)
-        dd = s_sq[None, :] - 2.0 * (S @ S.T) + s_sq[:, None]
+        dd = cdist(S, S, metric="sqeuclidean")
         np.fill_diagonal(dd, np.inf)
         np.maximum(dd, 0.0, out=dd)
         i, j = np.unravel_index(np.argmin(dd), dd.shape)
@@ -162,8 +166,7 @@ def maximin_swap(X: np.ndarray, idx: np.ndarray, max_iter: int = 10) -> np.ndarr
         for drop in (i, j):
             keep = np.delete(idx, drop)
             K = X[keep]
-            k_sq = sq_norms(K)
-            dc = k_sq[None, :] - 2.0 * (X[cand] @ K.T) + sq_norms(X[cand])[:, None]
+            dc = cdist(X[cand], K, metric="sqeuclidean")
             np.maximum(dc, 0.0, out=dc)
             nearest = np.sqrt(dc.min(axis=1))
             best = int(np.argmax(nearest))
@@ -257,7 +260,8 @@ def refine(
             if mix_seeds is not None:
                 extra = rng.choice(
                     np.setdiff1d(np.arange(P.shape[0]), mix_seeds),
-                    size=max(n - mix_seeds.size, 0), replace=False,
+                    size=max(n - mix_seeds.size, 0),
+                    replace=False,
                 )
                 return np.sort(np.concatenate([mix_seeds, extra])).astype(np.int64)[:n]
             return rng.choice(P.shape[0], size=n, replace=False).astype(np.int64)

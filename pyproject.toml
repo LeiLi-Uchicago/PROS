@@ -33,6 +33,7 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.23",
+  "scipy>=1.9",
   "scikit-learn>=1.2",
 ]
 
@@ -75,6 +76,7 @@ packages = ["pros"]
 [tool.hatch.build.targets.sdist]
 include = [
   "/pros",
+  "/tests",
   "/examples",
   "/data",
   "/docs",

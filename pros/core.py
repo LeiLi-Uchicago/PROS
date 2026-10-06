@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import pathlib
 import time
+import warnings
 
 import numpy as np
 
+from ._validation import integer, matrix
 from .allocate import make_allocation, water_filling
 from .partition import make_partition
 from .select import make_selector, refine
@@ -68,7 +70,11 @@ class SketchResult(dict):
     ['partition', 'stage1', 'stage2', 'total']
     """
 
-    __getattr__ = dict.__getitem__
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
 #: Empirical block-count rule used by ``n_blocks="auto"``.
@@ -157,7 +163,7 @@ def sketch(
     selector : {"fft", "scsampler_maximin", "random"}, default "fft"
         Within-block stage-1 selection rule.
     refiner : {"fft", "maximin", "local_swap", "none"}, default "fft"
-        Stage-2 global rule.  ``"none"`` disables refinement.
+        Stage-2 global rule.  ``"none"`` uniformly downsamples the pool to n points.
     d_intrinsic : float, optional
         Intrinsic dimension, required only by ``allocator="volume"``.
         Defaults to 5.0 with a warning if unset, since the ambient dimension
@@ -203,8 +209,9 @@ def sketch(
     -----
     Stage 2 is restricted to the pool, so cost scales with ``r*n`` rather than
     ``N``.  That is where the speed-up over a global farthest-first traversal
-    comes from, and why ``r`` behaves as an accuracy dial: a denser pool can
-    only improve what stage 2 has to choose from.
+    comes from, and why ``r`` behaves as an accuracy dial. A denser pool
+    offers more candidates; the achieved greedy radius need not improve
+    monotonically with r.
 
     Examples
     --------
@@ -235,17 +242,36 @@ def sketch(
     sketch_adata : AnnData entry point.
     pros.certificate : recompute a certificate for an existing sketch.
     """
-    X = np.ascontiguousarray(X, dtype=np.float64)
+    X = matrix(X)
     if X.ndim != 2:
         raise ValueError(f"X must be 2-D, got {X.shape}")
     n_cells = X.shape[0]
-    n = int(n)
+    n = integer(n, "n", minimum=1, maximum=n_cells)
     if not 0 < n <= n_cells:
         raise ValueError(f"n must be in (0, {n_cells}], got {n}")
-    if r < 1:
+    if not np.isfinite(r) or r < 1:
         raise ValueError(f"oversampling ratio r must be >= 1, got {r}")
     if mix_source not in ("pool", "data"):
         raise ValueError(f'mix_source must be "pool" or "data", got {mix_source!r}')
+
+    if not np.isfinite(mix) or not 0 <= mix <= 1:
+        raise ValueError("mix must be finite and in [0, 1]")
+    if refiner not in ("fft", "maximin", "local_swap", "none"):
+        raise ValueError("unknown refiner")
+    make_selector(selector)  # validate even for the fused allocator
+    if allocator == "water_filling" and selector != "fft":
+        raise ValueError(
+            "water_filling is fused with FFT; use selector='fft' or another allocator"
+        )
+    if mix > 0 and refiner != "fft":
+        raise ValueError(
+            "mix currently requires refiner='fft' to preserve reserved points"
+        )
+    refine_max_iter = integer(refine_max_iter, "refine_max_iter")
+    if not np.isfinite(alpha) or alpha < 0:
+        raise ValueError("alpha must be finite and nonnegative")
+    if d_intrinsic is not None and (not np.isfinite(d_intrinsic) or d_intrinsic < 1):
+        raise ValueError("d_intrinsic must be finite and >= 1")
 
     rng = np.random.default_rng(seed)
     timings: dict[str, float] = {}
@@ -255,12 +281,10 @@ def sketch(
     t0 = time.perf_counter()
     if isinstance(n_blocks, str):
         if n_blocks != "auto":
-            raise ValueError(
-                f'n_blocks must be an int or "auto", got {n_blocks!r}'
-            )
+            raise ValueError(f'n_blocks must be an int or "auto", got {n_blocks!r}')
         resolved_blocks = auto_n_blocks(n_cells)
     else:
-        resolved_blocks = int(n_blocks)
+        resolved_blocks = integer(n_blocks, "n_blocks", minimum=1)
         if resolved_blocks < 1:
             raise ValueError(f"n_blocks must be >= 1, got {resolved_blocks}")
         resolved_blocks = min(resolved_blocks, n_cells)
@@ -283,6 +307,9 @@ def sketch(
     else:
         if allocator == "volume" and d_intrinsic is None:
             used_fallback = True
+            warnings.warn(
+                "allocator=volume: using d_intrinsic=5.0", UserWarning, stacklevel=2
+            )
         m_per_block = make_allocation(
             X,
             labels,
@@ -303,9 +330,7 @@ def sketch(
                 continue
             local = select_fn(X[members], m_b, rng)
             chunks.append(members[np.asarray(local, dtype=np.int64)])
-        pool_indices = (
-            np.concatenate(chunks) if chunks else np.empty(0, dtype=np.int64)
-        )
+        pool_indices = np.concatenate(chunks) if chunks else np.empty(0, dtype=np.int64)
         wf_info = {}
     pool_indices = np.unique(np.asarray(pool_indices, dtype=np.int64))
     timings["stage1"] = time.perf_counter() - t0
@@ -333,7 +358,12 @@ def sketch(
     # ---- stage 2: global refinement ------------------------------------
     t0 = time.perf_counter()
     local_final = refine(
-        X[pool_indices], n, refiner, rng, max_iter=refine_max_iter, mix=mix,
+        X[pool_indices],
+        n,
+        refiner,
+        rng,
+        max_iter=refine_max_iter,
+        mix=mix,
         mix_seeds=mix_seeds,
     )
     final = np.sort(pool_indices[np.asarray(local_final, dtype=np.int64)])
@@ -365,6 +395,14 @@ def sketch(
             selector=selector,
             refiner=refiner,
             seed=seed,
+            d_intrinsic=5.0
+            if allocator == "volume" and d_intrinsic is None
+            else d_intrinsic,
+            alpha=alpha,
+            refine_max_iter=refine_max_iter,
+            mix=mix,
+            mix_source=mix_source,
+            certify=certify,
         ),
         volume_allocator_missing_dim=used_fallback,
         **wf_info,
@@ -380,7 +418,13 @@ def sketch(
         t0 = time.perf_counter()
         from .certify import certificate
 
-        cert = certificate(X, final, pool_indices=pool_indices, seed=seed)
+        cert = certificate(
+            X,
+            final,
+            pool_indices=pool_indices,
+            seed=seed,
+            assume_fft_refinement=(refiner == "fft" and mix == 0),
+        )
         cert_timings = cert.pop("timings", {})
         result.update(cert)
         timings["certify"] = time.perf_counter() - t0
@@ -424,10 +468,11 @@ def sketch_adata(
     return_adata : bool, default False
         If True, return the subset AnnData instead of the
         :class:`SketchResult`.  The result object is attached to the subset as
-        ``.uns["pros"]`` so the certificate is not lost.
+        ``.uns["pros"]`` when copy=True so the certificate is not lost.
     copy : bool, default True
-        Only consulted when ``return_adata`` is True.  If False, and the input
-        is backed, the returned view is not materialised.
+        Only consulted when ``return_adata`` is True. If False, returns an
+        in-memory view without attaching metadata.
+        Backed input requires copy=True when returning AnnData.
     **kwargs
         Forwarded verbatim to :func:`sketch` (``n_blocks``, ``r``, ``seed``,
         ``certify``, ...).
@@ -466,24 +511,31 @@ def sketch_adata(
         opened = ad.read_h5ad(str(adata), backed="r")
         adata = opened
 
-    if use_rep == "X":
-        X = adata.X
-        X = np.asarray(X.todense()) if hasattr(X, "todense") else np.asarray(X)
-    else:
-        if use_rep not in adata.obsm:
-            raise KeyError(
-                f"{use_rep!r} not in adata.obsm (available: {list(adata.obsm)})"
-            )
-        X = np.asarray(adata.obsm[use_rep])
-
-    res = sketch(X, n, **kwargs)
-
-    if not return_adata:
-        return res
-
-    sub = adata[res.indices]
-    if copy:
-        sub = sub.to_memory() if hasattr(sub, "to_memory") else sub.copy()
-    # Keep the certificate with the data it describes.
-    sub.uns["pros"] = {k: v for k, v in res.items() if k != "block_labels"}
-    return sub
+    try:
+        if return_adata and not copy and getattr(adata, "isbacked", False):
+            raise ValueError("return_adata=True with backed input requires copy=True")
+        if use_rep == "X":
+            X = adata.X
+            if hasattr(X, "todense") or hasattr(X, "to_memory"):
+                raise ValueError(
+                    "use_rep='X' requires a dense matrix; use a reduced obsm embedding"
+                )
+            X = np.asarray(X)
+        else:
+            if use_rep not in adata.obsm:
+                raise KeyError(
+                    f"{use_rep!r} not in adata.obsm (available: {list(adata.obsm)})"
+                )
+            X = np.asarray(adata.obsm[use_rep])
+        res = sketch(X, n, **kwargs)
+        if not return_adata:
+            return res
+        sub = adata[res.indices]
+        if copy:
+            sub = sub.to_memory(copy=True) if sub.isbacked else sub.copy()
+            sub.uns["pros"] = {k: v for k, v in res.items() if k != "block_labels"}
+        # Writing .uns on a view materializes it, defeating copy=False.
+        return sub
+    finally:
+        if opened is not None:
+            opened.file.close()

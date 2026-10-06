@@ -38,6 +38,14 @@ def round_to_budget(
     """
     w = np.asarray(weights, dtype=np.float64)
     caps = np.asarray(caps, dtype=np.int64)
+    if (
+        w.ndim != 1
+        or caps.shape != w.shape
+        or not np.isfinite(w).all()
+        or np.any(w < 0)
+        or np.any(caps < 0)
+    ):
+        raise ValueError("weights/caps must be aligned finite nonnegative vectors")
     n_blocks = w.shape[0]
     budget = int(min(int(budget), int(caps.sum())))
     if budget <= 0:
@@ -48,6 +56,8 @@ def round_to_budget(
         if floors is None
         else np.asarray(floors, dtype=np.int64)
     )
+    if floors.shape != caps.shape or np.any(floors < 0):
+        raise ValueError("floors must be aligned nonnegative integers")
     floors = np.minimum(floors, caps)
 
     # Budget too small to fund every floor: fund the highest-weight blocks.
@@ -217,7 +227,10 @@ def water_filling(
             heapq.heappush(heap, (-st.radius, b, tie))
 
     final_radii = np.array(
-        [states[b].radius if b in states else 0.0 for b in range(n_blocks)],
+        [
+            states[b].radius if b in states else (np.inf if sizes[b] else 0.0)
+            for b in range(n_blocks)
+        ],
         dtype=np.float64,
     )
     info = {
@@ -273,7 +286,7 @@ def make_allocation(
     Examples
     --------
     >>> import numpy as np
-    >>> from pros import make_allocation
+    >>> from pros.allocate import make_allocation
     >>> X = np.random.default_rng(0).random((300, 3))
     >>> labels = np.repeat([0, 1, 2], 100)
     >>> m = make_allocation(X, labels, 3, 60, "proportional")

@@ -7,19 +7,17 @@ farthest-first traversal (FFT).  Exposing the traversal as a resumable object
 single-block FFT: it simply keeps one ``FarthestFirst`` per block in a priority
 queue and advances whichever block currently has the largest covering radius.
 
-Distance computations use the BLAS identity
-
-    ||a - b||^2 = ||a||^2 + ||b||^2 - 2 <a, b>
-
-so each traversal step is a single matrix-vector product (``X @ X[j]``) rather
-than a broadcast subtraction.  The broadcast form ``((X - X[j])**2).sum(1)``
-allocates an ``N x d`` temporary on every step and is roughly an order of
-magnitude slower for the array shapes used here.
+Distances use SciPy's direct squared-Euclidean kernel to avoid catastrophic
+cancellation in the norm/dot-product identity for translated coordinates.
+Pairwise assignments are tiled across both points and centres.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial.distance import cdist
+
+from ._validation import indices, integer, matrix
 
 __all__ = [
     "sq_norms",
@@ -56,38 +54,41 @@ class FarthestFirst:
     i.e. ``max_i min_{s in S} d(x_i, s)``.  Because FFT always selects the
     point realising that maximum, the hop distance of the (k+1)-th point equals
     the radius after k points, and the sequence of radii is non-increasing.
-    That monotonicity is what makes :func:`min_pairwise_distance` on an FFT
-    prefix equal to the radius, and underpins the ``OPT >= delta / 2`` lower
+    The minimum separation of a prefix of k+1 points equals the radius
+    after k points, and underpins the ``OPT >= delta / 2`` lower
     bound used by :mod:`pros.certify`.
     """
 
     def __init__(self, X: np.ndarray, seed_index: int | None = None, rng=None):
-        self.X = np.ascontiguousarray(X, dtype=np.float64)
+        self.X = matrix(X)
         if self.X.ndim != 2:
             raise ValueError(f"X must be 2-D, got shape {self.X.shape}")
         self.n_points = self.X.shape[0]
         if self.n_points == 0:
             raise ValueError("X must contain at least one point")
-        self._sq = sq_norms(self.X)
         self.mindist2 = np.full(self.n_points, np.inf, dtype=np.float64)
         self.selected: list[int] = []
-        # Radius *before* each selection, i.e. hop distances. radii[k] is the
+        self._selected_mask = np.zeros(self.n_points, dtype=bool)
+        # Radius after each selection. radii[k] is the
         # covering radius achieved by the first k+1 selected points.
         self.radii: list[float] = []
 
         if seed_index is None:
             seed_index = int(rng.integers(self.n_points)) if rng is not None else 0
-        self._add(int(seed_index))
+        self._add(integer(seed_index, "seed_index", maximum=self.n_points - 1))
 
     # -- internals ---------------------------------------------------------
     def _add(self, j: int) -> None:
-        d2 = self._sq + self._sq[j] - 2.0 * (self.X @ self.X[j])
+        d2 = cdist(self.X, self.X[j : j + 1], metric="sqeuclidean")[:, 0]
+        if not np.isfinite(d2).all():
+            raise ValueError("distance overflow; rescale X")
         np.maximum(d2, 0.0, out=d2)  # guard against round-off negatives
         # A selected row is exactly covered by itself. The BLAS identity can
         # otherwise leave a tiny positive residual when every row is selected.
         d2[j] = 0.0
         np.minimum(self.mindist2, d2, out=self.mindist2)
         self.selected.append(int(j))
+        self._selected_mask[j] = True
         self.radii.append(float(np.sqrt(self.mindist2.max())))
 
     # -- public API --------------------------------------------------------
@@ -113,7 +114,7 @@ class FarthestFirst:
         """
         if self.exhausted:
             raise RuntimeError("all points have been selected")
-        j = int(np.argmax(self.mindist2))
+        j = int(np.argmax(np.where(self._selected_mask, -np.inf, self.mindist2)))
         hop_distance = float(np.sqrt(self.mindist2[j]))
         self._add(j)
         return j, hop_distance
@@ -124,13 +125,14 @@ class FarthestFirst:
         Used to pre-seed a traversal (see :func:`farthest_first_seeded`).  No-op
         if ``j`` is already selected.
         """
-        if j in self.selected:
+        j = integer(j, "j", maximum=self.n_points - 1)
+        if self._selected_mask[j]:
             return
         self._add(int(j))
 
     def run_to(self, n: int) -> list[int]:
         """Advance the traversal until ``n`` points are selected."""
-        target = min(int(n), self.n_points)
+        target = integer(n, "n", maximum=self.n_points)
         while self.n_selected < target:
             self.hop()
         return self.selected
@@ -163,24 +165,26 @@ def farthest_first(
         Source of randomness for the first point only; the remaining
         ``n - 1`` choices are deterministic given it.
     return_state : bool, default False
-        Also return the running nearest-centre distance array, so a caller
+        Also return the traversal state, so a caller
         can continue the traversal without recomputing it.
 
     Returns
     -------
     numpy.ndarray or tuple
-        ``(n,)`` int64 indices, or ``(indices, dist)`` when
+        ``(n,)`` int64 indices, or ``(indices, FarthestFirst)`` when
         ``return_state=True``.
 
     Examples
     --------
     >>> import numpy as np
-    >>> from pros import farthest_first
+    >>> from pros.geometry import farthest_first
     >>> X = np.array([[0.0], [1.0], [2.0], [10.0]])
     >>> sorted(farthest_first(X, 2, seed_index=0).tolist())
     [0, 3]
     """
-    if n <= 0:
+    X = matrix(X)
+    n = integer(n, "n", maximum=len(X))
+    if n == 0:
         empty = np.empty(0, dtype=np.int64)
         return (empty, None) if return_state else empty
     state = FarthestFirst(X, seed_index=seed_index, rng=rng)
@@ -192,27 +196,29 @@ def farthest_first(
 def _pairwise_block_min(
     Q: np.ndarray,
     C: np.ndarray,
-    c_sq: np.ndarray,
     chunk: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Nearest-centre distance and index for every row of ``Q``.
 
-    Chunked over ``Q`` so peak memory is ``chunk * len(C)`` floats rather than
-    ``len(Q) * len(C)``.
+    Tiles both arrays so the distance buffer holds at most 1024 by 1024
+    doubles, plus the linear-sized result arrays.
     """
     n_q = Q.shape[0]
-    best_d2 = np.empty(n_q, dtype=np.float64)
-    best_j = np.empty(n_q, dtype=np.int64)
-    for start in range(0, n_q, chunk):
-        stop = min(start + chunk, n_q)
-        block = Q[start:stop]
-        # (chunk, |C|) squared distances
-        d2 = c_sq[None, :] - 2.0 * (block @ C.T)
-        d2 += sq_norms(block)[:, None]
-        np.maximum(d2, 0.0, out=d2)
-        j = np.argmin(d2, axis=1)
-        best_j[start:stop] = j
-        best_d2[start:stop] = d2[np.arange(stop - start), j]
+    best_d2 = np.full(n_q, np.inf)
+    best_j = np.zeros(n_q, dtype=np.int64)
+    # A distance tile holds at most 1,048,576 doubles (~8 MiB).
+    q_chunk = min(chunk, 1024)
+    for start in range(0, n_q, q_chunk):
+        stop = min(start + q_chunk, n_q)
+        for cs in range(0, len(C), 1024):
+            d2 = cdist(Q[start:stop], C[cs : cs + 1024], metric="sqeuclidean")
+            if not np.isfinite(d2).all():
+                raise ValueError("distance overflow; rescale coordinates")
+            j = np.argmin(d2, axis=1)
+            v = d2[np.arange(stop - start), j]
+            better = v < best_d2[start:stop]
+            best_d2[start:stop][better] = v[better]
+            best_j[start:stop][better] = cs + j[better]
     return np.sqrt(best_d2), best_j
 
 
@@ -225,15 +231,16 @@ def assign_nearest(
 
     Exact (brute force, chunked) nearest-centre assignment.
     """
-    X = np.ascontiguousarray(X, dtype=np.float64)
-    C = np.ascontiguousarray(centres, dtype=np.float64)
+    X = matrix(X)
+    C = matrix(centres, "centres")
+    chunk = integer(chunk, "chunk", minimum=1)
     if C.ndim != 2 or C.shape[0] == 0:
         raise ValueError("centres must be a non-empty 2-D array")
     if C.shape[1] != X.shape[1]:
         raise ValueError(
             f"dimension mismatch: X has {X.shape[1]}, centres have {C.shape[1]}"
         )
-    return _pairwise_block_min(X, C, sq_norms(C), chunk)
+    return _pairwise_block_min(X, C, chunk)
 
 
 def covering_radius(X: np.ndarray, centres: np.ndarray, chunk: int = 4096) -> float:
@@ -251,8 +258,8 @@ def covering_radius(X: np.ndarray, centres: np.ndarray, chunk: int = 4096) -> fl
     centres : numpy.ndarray
         ``(n, d)`` sketch coordinates -- the points themselves, not indices.
     chunk : int, default 4096
-        Rows of ``X`` processed per pass.  Bounds peak memory at
-        ``chunk * n`` floats; it does not affect the result.
+        Maximum rows per pass (internally capped at 1024). Distance tiles
+        use at most 1024 by 1024 doubles; it does not affect the result.
 
     Returns
     -------
@@ -262,7 +269,7 @@ def covering_radius(X: np.ndarray, centres: np.ndarray, chunk: int = 4096) -> fl
     Examples
     --------
     >>> import numpy as np
-    >>> from pros import covering_radius
+    >>> from pros.geometry import covering_radius
     >>> X = np.array([[0.0], [1.0], [2.0], [10.0]])
     >>> covering_radius(X, X[[0, 1, 2]])   # point at 10 is 8 away
     8.0
@@ -297,28 +304,25 @@ def min_pairwise_distance(P: np.ndarray, chunk: int = 4096) -> float:
     Examples
     --------
     >>> import numpy as np
-    >>> from pros import min_pairwise_distance
+    >>> from pros.geometry import min_pairwise_distance
     >>> min_pairwise_distance(np.array([[0.0], [1.0], [5.0]]))
     1.0
     """
-    P = np.ascontiguousarray(P, dtype=np.float64)
-    n = P.shape[0]
-    if n < 2:
+    P = matrix(P, "P")
+    chunk = min(integer(chunk, "chunk", minimum=1), 1024)
+    if len(P) < 2:
         return float("inf")
-    p_sq = sq_norms(P)
     best = np.inf
-    for start in range(0, n, chunk):
-        stop = min(start + chunk, n)
-        block = P[start:stop]
-        d2 = p_sq[None, :] - 2.0 * (block @ P.T)
-        d2 += sq_norms(block)[:, None]
-        # mask the diagonal
-        rows = np.arange(stop - start)
-        d2[rows, rows + start] = np.inf
-        np.maximum(d2, 0.0, out=d2)
-        m = d2.min()
-        if m < best:
-            best = m
+    for start in range(0, len(P), chunk):
+        for cs in range(start, len(P), chunk):
+            d2 = cdist(
+                P[start : start + chunk], P[cs : cs + chunk], metric="sqeuclidean"
+            )
+            if not np.isfinite(d2).all():
+                raise ValueError("distance overflow; rescale coordinates")
+            if start == cs:
+                np.fill_diagonal(d2, np.inf)
+            best = min(best, float(d2.min()))
     return float(np.sqrt(best))
 
 
@@ -351,7 +355,11 @@ def farthest_first_seeded(
     ``beta`` of the budget is a factor ``(1 - beta)^{-1/d}`` — small at the
     ``d`` real single-cell data exhibit.
     """
-    seed_indices = np.unique(np.asarray(seed_indices, dtype=np.int64))
+    X = matrix(X)
+    n = integer(n, "n", maximum=len(X))
+    seed_indices = indices(seed_indices, len(X), "seed_indices", allow_empty=True)
+    if seed_indices.size > n:
+        raise ValueError("seed count exceeds n")
     if seed_indices.size == 0:
         return farthest_first(X, n, return_state=return_state)
     state = FarthestFirst(X, seed_index=int(seed_indices[0]))

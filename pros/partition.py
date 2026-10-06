@@ -80,13 +80,9 @@ def pc_tree_blocks(X: np.ndarray, n_blocks: int) -> np.ndarray:
                 direction = np.zeros(sub.shape[1])
                 direction[0] = 1.0
             proj = centred @ direction
-            median = np.median(proj)
-            left_mask = proj <= median
-            if left_mask.all() or (~left_mask).all():
-                # all points project identically; fall back to an index split
-                half = len(members) // 2
-                left_mask = np.zeros(len(members), dtype=bool)
-                left_mask[:half] = True
+            order_local = np.argsort(proj, kind="stable")
+            left_mask = np.zeros(len(members), dtype=bool)
+            left_mask[order_local[: len(members) // 2]] = True
             nodes[i] = members[left_mask]
             nodes.append(members[~left_mask])
             progressed = True
@@ -97,7 +93,7 @@ def pc_tree_blocks(X: np.ndarray, n_blocks: int) -> np.ndarray:
     labels = np.empty(n_points, dtype=np.int32)
     for b, members in enumerate(nodes):
         labels[members] = b
-    return labels
+    return np.unique(labels, return_inverse=True)[1].astype(np.int32)
 
 
 def make_partition(
@@ -138,7 +134,7 @@ def make_partition(
     Examples
     --------
     >>> import numpy as np
-    >>> from pros import make_partition
+    >>> from pros.partition import make_partition
     >>> X = np.random.default_rng(0).random((300, 4))
     >>> labels = make_partition(X, "kmeans", 5, np.random.default_rng(0))
     >>> labels.shape, int(labels.min()), int(labels.max())
@@ -162,4 +158,4 @@ def make_partition(
     # arithmetic silently misallocates if this is violated.
     if labels.shape[0] != X.shape[0]:
         raise AssertionError("partition labels do not match number of points")
-    return labels
+    return np.unique(labels, return_inverse=True)[1].astype(np.int32)
