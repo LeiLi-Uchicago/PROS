@@ -12,10 +12,10 @@ meaningful geometry.
 
 ## Installation
 
-PROS requires Python 3.10 or newer. Install version 0.1.0 from PyPI:
+PROS requires Python 3.10 or newer. Install from PyPI:
 
 ```bash
-pip install pros-sketch==0.1.0
+pip install pros-sketch
 ```
 
 The distribution name is `pros-sketch`; the Python import remains `pros`.
