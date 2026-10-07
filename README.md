@@ -56,6 +56,20 @@ PROS uses k-means partitioning, water-filling allocation, an oversampling ratio
 of `r=10.0`, and global farthest-first refinement. Pass an explicit `seed` to
 make a stochastic configuration reproducible.
 
+To discover the available knobs from Python, use the built-in help tools and
+the package option summary:
+
+```python
+import inspect
+import pros
+
+help(pros.sketch)
+print(inspect.signature(pros.sketch))
+
+pros.options()
+pros.options("partitioner")
+```
+
 ## Certification
 
 Set `certify=True` to compute the final covering radius, the candidate-pool
@@ -107,8 +121,10 @@ result = sketch(
 ```
 
 The `partitioner`, within-partition `selector`, `allocator`, and global
-`refiner` are modular. See [`docs/configuration.md`](docs/configuration.md) for
-the supported values and [`docs/theory.md`](docs/theory.md) for the covering
+`refiner` are modular. Run `pros.options()` to print every configurable
+category, or pass a category such as `pros.options("allocator")` to focus on
+one family. See [`docs/configuration.md`](docs/configuration.md) for the
+supported values and [`docs/theory.md`](docs/theory.md) for the covering
 objective and certificate definitions.
 
 ## Repository layout

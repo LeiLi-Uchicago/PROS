@@ -5,6 +5,7 @@ matrices, :func:`sketch_adata` for AnnData, and the certificate helpers to
 evaluate a completed sketch.
 """
 
+from ._options import options
 from .certify import certificate, choose_r, estimate_opt_scale, opt_bounds
 from .core import SketchResult, sketch, sketch_adata
 
@@ -18,5 +19,6 @@ __all__ = [
     "opt_bounds",
     "choose_r",
     "estimate_opt_scale",
+    "options",
     "__version__",
 ]

@@ -23,6 +23,7 @@ import warnings
 
 import numpy as np
 
+from ._options import Allocator, MixSource, NBlocks, Partitioner, Refiner, Selector
 from ._validation import integer, matrix
 from .allocate import make_allocation, water_filling
 from .partition import make_partition
@@ -112,17 +113,17 @@ def sketch(
     X: np.ndarray,
     n: int,
     *,
-    partitioner: str = "kmeans",
-    n_blocks: int | str = "auto",
-    allocator: str = "water_filling",
+    partitioner: Partitioner = "kmeans",
+    n_blocks: NBlocks = "auto",
+    allocator: Allocator = "water_filling",
     r: float = 10.0,
-    selector: str = "fft",
-    refiner: str = "fft",
+    selector: Selector = "fft",
+    refiner: Refiner = "fft",
     d_intrinsic: float | None = None,
     alpha: float = 0.5,
     refine_max_iter: int = 25,
     mix: float = 0.0,
-    mix_source: str = "pool",
+    mix_source: MixSource = "pool",
     seed: int = 0,
     certify: bool = False,
     verbose: bool = False,
