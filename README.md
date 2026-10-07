@@ -12,8 +12,14 @@ meaningful geometry.
 
 ## Installation
 
-PROS requires Python 3.10 or newer. The distribution name is `pros-sketch`;
-the Python import remains `pros`. The commands below install this checkout.
+PROS requires Python 3.10 or newer. Install version 0.1.0 from PyPI:
+
+```bash
+pip install pros-sketch==0.1.0
+```
+
+The distribution name is `pros-sketch`; the Python import remains `pros`.
+To install a local checkout for development:
 
 ```bash
 python -m pip install -e .
