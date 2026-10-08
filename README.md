@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="docs/assets/pros-logo.png" alt="PROS logo: partitioned scatter points with selected representatives" width="160">
-</p>
-
-<h1 align="center">PROS</h1>
+<h1 align="center">
+  <img src="docs/assets/pros-logo.png" alt="PROS logo" width="48" height="48" align="absmiddle">
+  PROS
+</h1>
 
 <p align="center">
   <strong>Partitioned and Refined Oversampling Sketches</strong><br>
@@ -13,6 +12,10 @@
   <a href="https://pypi.org/project/pros-sketch/"><img src="https://img.shields.io/pypi/v/pros-sketch?color=17634c" alt="PyPI version"></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB" alt="Python 3.10 or newer"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-ef745e" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/pros-workflow.png" alt="PROS workflow: partition the dataset, oversample within each partition, pool candidates, and globally refine the final sketch" width="100%">
 </p>
 
 PROS selects a small,
