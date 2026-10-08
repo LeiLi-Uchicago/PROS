@@ -1,6 +1,21 @@
-# PROS
+<p align="center">
+  <img src="docs/assets/pros-logo.png" alt="PROS logo: partitioned scatter points with selected representatives" width="160">
+</p>
 
-PROS (Partitioned and Refined Oversampling Sketches) selects a small,
+<h1 align="center">PROS</h1>
+
+<p align="center">
+  <strong>Partitioned and Refined Oversampling Sketches</strong><br>
+  Partition. Sample. Refine.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/pros-sketch/"><img src="https://img.shields.io/pypi/v/pros-sketch?color=17634c" alt="PyPI version"></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB" alt="Python 3.10 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-ef745e" alt="MIT license"></a>
+</p>
+
+PROS selects a small,
 diversity-preserving subset of rows from a large real-valued coordinate matrix.
 It builds an oversampled candidate pool within partitions and performs one
 global refinement pass over that pool. The returned subset is represented by
