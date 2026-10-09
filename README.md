@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/assets/pros-logo.png" alt="PROS logo" width="48" height="48" align="absmiddle">
+  <img src="https://raw.githubusercontent.com/LeiLi-Uchicago/PROS/main/docs/assets/pros-logo.png" alt="PROS logo" width="48" height="48" align="absmiddle">
   PROS
 </h1>
 
@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/pros-workflow.png" alt="PROS workflow: partition the dataset, oversample within each partition, pool candidates, and globally refine the final sketch" width="100%">
+  <img src="https://raw.githubusercontent.com/LeiLi-Uchicago/PROS/main/docs/assets/pros-workflow.png" alt="PROS workflow: partition the dataset, oversample within each partition, pool candidates, and globally refine the final sketch" width="100%">
 </p>
 
 PROS selects a small,
