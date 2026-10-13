@@ -8,7 +8,7 @@ Partitioner = Literal["kmeans", "pc_tree", "random", "none"]
 NBlocks = int | Literal["auto"]
 Allocator = Literal["water_filling", "proportional", "power", "volume", "uniform"]
 Selector = Literal["fft", "scsampler_maximin", "random"]
-Refiner = Literal["fft", "maximin", "local_swap", "none"]
+Refiner = Literal["fft", "scsampler_maximin", "maximin", "local_swap", "none"]
 MixSource = Literal["pool", "data"]
 
 _OPTION_DETAILS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -36,7 +36,8 @@ _OPTION_DETAILS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "refiner": (
         ("fft", "default; global farthest-first refinement"),
-        ("maximin", "swap improvement for pairwise separation"),
+        ("scsampler_maximin", "upstream scSampler on the global candidate pool"),
+        ("maximin", "PROS swap heuristic for pairwise separation"),
         ("local_swap", "swap-based local search for covering radius"),
         ("none", "uniformly downsample the candidate pool"),
     ),

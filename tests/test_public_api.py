@@ -47,13 +47,22 @@ def test_options_prints_all_categories(capsys: pytest.CaptureFixture[str]) -> No
     assert "water_filling" in out
 
 
-def test_options_prints_one_category(capsys: pytest.CaptureFixture[str]) -> None:
-    pros.options("partitioner")
+@pytest.mark.parametrize(
+    ("category", "expected"),
+    [("partitioner", "kmeans"), ("refiner", "scsampler_maximin")],
+)
+def test_options_prints_one_category(
+    capsys: pytest.CaptureFixture[str], category: str, expected: str
+) -> None:
+    pros.options(category)
 
     out = capsys.readouterr().out
-    assert out.startswith("partitioner:")
-    assert "kmeans" in out
+    assert out.startswith(f"{category}:")
+    assert expected in out
     assert "allocator:" not in out
+    if category == "refiner":
+        assert "upstream scSampler on the global candidate pool" in out
+        assert "PROS swap heuristic" in out
 
 
 def test_options_rejects_unknown_category() -> None:
