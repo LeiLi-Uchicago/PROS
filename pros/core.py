@@ -9,7 +9,8 @@ component        options
 ``allocator``    ``proportional`` | ``power`` | ``volume`` | ``uniform``
                  | ``water_filling`` (fused with selection)
 ``selector``     ``fft`` | ``scsampler_maximin`` | ``random``
-``refiner``      ``fft`` | ``maximin`` | ``local_swap`` | ``none``
+``refiner``      ``fft`` | ``scsampler_maximin`` | ``maximin`` |
+                 ``local_swap`` | ``none``
 ===============  =======================================================
 
 The components can be exchanged without changing the two-stage control flow.
@@ -163,8 +164,11 @@ def sketch(
         selection.
     selector : {"fft", "scsampler_maximin", "random"}, default "fft"
         Within-block stage-1 selection rule.
-    refiner : {"fft", "maximin", "local_swap", "none"}, default "fft"
-        Stage-2 global rule.  ``"none"`` uniformly downsamples the pool to n points.
+    refiner : {"fft", "scsampler_maximin", "maximin", "local_swap", "none"},
+        default "fft"
+        Stage-2 global rule. ``"scsampler_maximin"`` runs upstream scSampler
+        on the pooled candidates with one split. ``"maximin"`` is a separate
+        in-package swap heuristic. ``"none"`` uniformly downsamples the pool.
     d_intrinsic : float, optional
         Intrinsic dimension, required only by ``allocator="volume"``.
         Defaults to 5.0 with a warning if unset, since the ambient dimension
@@ -172,7 +176,8 @@ def sketch(
     alpha : float, default 0.5
         Exponent for ``allocator="power"``.
     refine_max_iter : int, default 25
-        Cap on stage-2 refinement passes.
+        Cap on passes for the ``maximin`` and ``local_swap`` refiners;
+        not used by FFT or upstream scSampler.
     mix : float, default 0.0
         Fraction of the sketch drawn uniformly at random instead of
         geometrically.  ``mix>0`` trades covering radius for proportional
@@ -257,7 +262,7 @@ def sketch(
 
     if not np.isfinite(mix) or not 0 <= mix <= 1:
         raise ValueError("mix must be finite and in [0, 1]")
-    if refiner not in ("fft", "maximin", "local_swap", "none"):
+    if refiner not in ("fft", "scsampler_maximin", "maximin", "local_swap", "none"):
         raise ValueError("unknown refiner")
     make_selector(selector)  # validate even for the fused allocator
     if allocator == "water_filling" and selector != "fft":

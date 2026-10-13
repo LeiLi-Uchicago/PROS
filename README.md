@@ -145,6 +145,15 @@ one family. See [`docs/configuration.md`](docs/configuration.md) for the
 supported values and [`docs/theory.md`](docs/theory.md) for the covering
 objective and certificate definitions.
 
+In the current source, `scsampler_maximin` is available for both `selector`
+and `refiner` and calls upstream scSampler. The `maximin` refiner is a separate
+PROS swap heuristic initialized by FFT. For all four FFT/scSampler
+combinations, use proportional allocation and see
+[`examples/05_compare_optimizers.py`](examples/05_compare_optimizers.py).
+The scSampler refiner is not included in the published `0.1.0` wheel; use the
+checkout and follow the upstream dependency and NumPy compatibility notes in
+[`docs/configuration.md`](docs/configuration.md).
+
 ## Repository layout
 
 - `pros/`: installable library code.

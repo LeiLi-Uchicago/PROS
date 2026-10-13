@@ -139,9 +139,10 @@ def maximin_swap(X: np.ndarray, idx: np.ndarray, max_iter: int = 10) -> np.ndarr
     """Improve the maximin (min pairwise distance) objective by swapping.
 
     Repeatedly locates the closest selected pair and tries to replace one of
-    the two with the unselected point that is farthest from the rest.  This is
-    the criterion scSampler optimises, as distinct from the covering criterion
-    targeted by :func:`kcenter_local_search`.
+    the two with the unselected point that is farthest from the rest. This
+    in-package heuristic does not call upstream scSampler. It targets
+    pairwise separation rather than the covering criterion used by
+    :func:`kcenter_local_search`.
     """
     idx = np.asarray(idx, dtype=np.int64).copy()
     n_sel = idx.size
@@ -254,6 +255,8 @@ def refine(
     mix = float(mix)
     if not 0.0 <= mix <= 1.0:
         raise ValueError(f"mix must be in [0, 1], got {mix}")
+    if kind == "scsampler_maximin" and mix > 0:
+        raise ValueError("scsampler_maximin refinement requires mix=0")
     if mix > 0.0 and kind != "none":
         k = int(round(mix * n))
         if k >= n:
@@ -284,10 +287,13 @@ def refine(
         return rng.choice(P.shape[0], size=n, replace=False).astype(np.int64)
     if kind == "fft":
         return farthest_first(P, n, rng=rng)
+    if kind == "scsampler_maximin":
+        return select_scsampler(P, n, rng)
     if kind == "maximin":
         return maximin_swap(P, farthest_first(P, n, rng=rng), max_iter=max_iter)
     if kind == "local_swap":
         return kcenter_local_search(P, farthest_first(P, n, rng=rng), max_iter=max_iter)
     raise ValueError(
-        f"unknown refiner {kind!r}; expected 'fft', 'maximin', 'local_swap', 'none'"
+        f"unknown refiner {kind!r}; expected 'fft', 'scsampler_maximin', "
+        "'maximin', 'local_swap', 'none'"
     )
