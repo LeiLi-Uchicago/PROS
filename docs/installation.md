@@ -10,6 +10,7 @@ Optional extras:
 
 ```bash
 python -m pip install -e ".[adata]"
+python -m pip install -e ".[geosketch]"
 python -m pip install -e ".[dev]"
 python -m pip install -e ".[docs]"
 ```

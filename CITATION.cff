@@ -13,5 +13,4 @@ keywords:
   - representative sampling
   - k-center
   - coreset
-version: 0.1.0
-date-released: 2026-08-15
+version: 0.1.3

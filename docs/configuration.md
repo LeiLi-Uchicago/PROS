@@ -21,8 +21,8 @@ Useful options:
 - `partitioner`: `"kmeans"`, `"pc_tree"`, `"random"`, or `"none"`.
 - `allocator`: `"water_filling"`, `"proportional"`, `"power"`, `"volume"`, or
   `"uniform"`.
-- `selector`: `"fft"`, `"scsampler_maximin"`, or `"random"`.
-- `refiner`: `"fft"`, `"scsampler_maximin"`, `"maximin"`, `"local_swap"`, or `"none"`.
+- `selector`: `"fft"`, `"scsampler_maximin"`, `"geosketch"`, or `"random"`.
+- `refiner`: `"fft"`, `"scsampler_maximin"`, `"geosketch"`, `"maximin"`, `"local_swap"`, or `"none"`.
 - `r`: oversampling ratio. Larger values make a denser pool and cost more.
 - `certify`: compute certificate fields for evaluation.
 
@@ -35,6 +35,22 @@ error. Other allocators support the other selectors. scSampler failures are
 propagated, never replaced silently with FFT. Fixed seeds are reproducible
 within a fixed numerical/software environment; record dependency versions and
 thread settings for experiments.
+
+## GeoSketch
+
+Install the optional dependency with `python -m pip install -e ".[geosketch]"`.
+Set `selector="geosketch"` to call `geosketch.gs` within each funded block.
+Use a non-water-filling allocator such as `power`. Set `refiner="geosketch"`
+with `mix=0` to call it on the ordered candidate pool. Both stages sample rows
+without replacement. A full quota returns every row. If all coordinates in a
+block or pool are identical, its single box is sampled uniformly by row index.
+
+Local calls draw seeds from the PROS generator. For refinement, an integer
+sketch seed in the upstream range (0 through 2³² − 1) is passed through
+directly, as in Figure 6. Other supported seeds supply a reproducible 32-bit
+seed from the PROS generator. The adapter restores NumPy's legacy RNG state.
+Certification remains available. The FFT-specific theory bound applies only
+to unmixed FFT refinement.
 
 ## Comparing FFT and scSampler
 

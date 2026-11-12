@@ -7,8 +7,10 @@ from typing import Literal
 Partitioner = Literal["kmeans", "pc_tree", "random", "none"]
 NBlocks = int | Literal["auto"]
 Allocator = Literal["water_filling", "proportional", "power", "volume", "uniform"]
-Selector = Literal["fft", "scsampler_maximin", "random"]
-Refiner = Literal["fft", "scsampler_maximin", "maximin", "local_swap", "none"]
+Selector = Literal["fft", "scsampler_maximin", "geosketch", "random"]
+Refiner = Literal[
+    "fft", "scsampler_maximin", "geosketch", "maximin", "local_swap", "none"
+]
 MixSource = Literal["pool", "data"]
 
 _OPTION_DETAILS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -32,11 +34,16 @@ _OPTION_DETAILS: dict[str, tuple[tuple[str, str], ...]] = {
     "selector": (
         ("fft", "default; farthest-first traversal"),
         ("scsampler_maximin", "upstream scSampler maximin selection"),
+        (
+            "geosketch",
+            "upstream GeoSketch within each block; use a non-water-filling allocator",
+        ),
         ("random", "uniform sample without replacement"),
     ),
     "refiner": (
         ("fft", "default; global farthest-first refinement"),
         ("scsampler_maximin", "upstream scSampler on the global candidate pool"),
+        ("geosketch", "upstream GeoSketch on the candidate pool; requires mix=0"),
         ("maximin", "PROS swap heuristic for pairwise separation"),
         ("local_swap", "swap-based local search for covering radius"),
         ("none", "uniformly downsample the candidate pool"),

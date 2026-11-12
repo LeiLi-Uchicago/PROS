@@ -49,6 +49,13 @@ Optional AnnData support:
 python -m pip install -e ".[adata]"
 ```
 
+For native GeoSketch selection and refinement, install the optional dependency
+from this checkout:
+
+```bash
+python -m pip install -e ".[geosketch]"
+```
+
 For testing and linting:
 
 ```bash
@@ -181,7 +188,7 @@ PROS is distributed under the [MIT License](LICENSE).
 ## Validated behavior and limits
 
 - Water-filling is fused with FFT and requires `selector="fft"`. Choose another
-  allocator to use random or scSampler selection. Missing or broken scSampler
+  allocator to use random, scSampler or GeoSketch selection. Missing or broken scSampler
   installations raise an error; no alternate algorithm is substituted.
 - `mix>0` currently requires `refiner="fft"` so reserved points are retained.
   `refiner="none"` uniformly downsamples the candidate pool to `n` rows.

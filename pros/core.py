@@ -8,9 +8,9 @@ component        options
 ``partitioner``  ``random`` | ``kmeans`` | ``pc_tree`` | ``none``
 ``allocator``    ``proportional`` | ``power`` | ``volume`` | ``uniform``
                  | ``water_filling`` (fused with selection)
-``selector``     ``fft`` | ``scsampler_maximin`` | ``random``
-``refiner``      ``fft`` | ``scsampler_maximin`` | ``maximin`` |
-                 ``local_swap`` | ``none``
+``selector``     ``fft`` | ``scsampler_maximin`` | ``geosketch`` | ``random``
+``refiner``      ``fft`` | ``scsampler_maximin`` | ``geosketch`` |
+                 ``maximin`` | ``local_swap`` | ``none``
 ===============  =======================================================
 
 The components can be exchanged without changing the two-stage control flow.
@@ -21,6 +21,7 @@ from __future__ import annotations
 import pathlib
 import time
 import warnings
+from typing import get_args
 
 import numpy as np
 
@@ -162,13 +163,16 @@ def sketch(
         Stage-1 oversampling ratio; the candidate pool holds ``min(r*n, N)``
         points. ``r=1`` with ``refiner="none"`` performs one-shot blockwise
         selection.
-    selector : {"fft", "scsampler_maximin", "random"}, default "fft"
-        Within-block stage-1 selection rule.
-    refiner : {"fft", "scsampler_maximin", "maximin", "local_swap", "none"},
-        default "fft"
+    selector : {"fft", "scsampler_maximin", "geosketch", "random"}, default "fft"
+        Within-block stage-1 selection rule. GeoSketch samples without replacement
+        in each funded block and requires an allocator other than water-filling.
+    refiner : Refiner, default "fft"
         Stage-2 global rule. ``"scsampler_maximin"`` runs upstream scSampler
         on the pooled candidates with one split. ``"maximin"`` is a separate
-        in-package swap heuristic. ``"none"`` uniformly downsamples the pool.
+        in-package swap heuristic. ``"geosketch"`` runs GeoSketch without replacement
+        on the merged pool and requires ``mix=0``. ``"fft"`` runs farthest-first
+        traversal, ``"local_swap"`` improves the covering radius by swaps, and
+        ``"none"`` uniformly downsamples the pool.
     d_intrinsic : float, optional
         Intrinsic dimension, required only by ``allocator="volume"``.
         Defaults to 5.0 with a warning if unset, since the ambient dimension
@@ -176,8 +180,7 @@ def sketch(
     alpha : float, default 0.5
         Exponent for ``allocator="power"``.
     refine_max_iter : int, default 25
-        Cap on passes for the ``maximin`` and ``local_swap`` refiners;
-        not used by FFT or upstream scSampler.
+        Cap on passes for the ``maximin`` and ``local_swap`` refiners.
     mix : float, default 0.0
         Fraction of the sketch drawn uniformly at random instead of
         geometrically.  ``mix>0`` trades covering radius for proportional
@@ -262,8 +265,10 @@ def sketch(
 
     if not np.isfinite(mix) or not 0 <= mix <= 1:
         raise ValueError("mix must be finite and in [0, 1]")
-    if refiner not in ("fft", "scsampler_maximin", "maximin", "local_swap", "none"):
-        raise ValueError("unknown refiner")
+    if refiner not in get_args(Refiner):
+        raise ValueError(
+            f"unknown refiner {refiner!r}; expected one of {get_args(Refiner)}"
+        )
     make_selector(selector)  # validate even for the fused allocator
     if allocator == "water_filling" and selector != "fft":
         raise ValueError(
@@ -371,6 +376,7 @@ def sketch(
         max_iter=refine_max_iter,
         mix=mix,
         mix_seeds=mix_seeds,
+        geosketch_seed=seed,
     )
     final = np.sort(pool_indices[np.asarray(local_final, dtype=np.int64)])
     timings["stage2"] = time.perf_counter() - t0

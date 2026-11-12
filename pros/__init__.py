@@ -9,7 +9,7 @@ from ._options import options
 from .certify import certificate, choose_r, estimate_opt_scale, opt_bounds
 from .core import SketchResult, sketch, sketch_adata
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     "sketch",

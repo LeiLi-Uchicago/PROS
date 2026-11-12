@@ -8,6 +8,7 @@ into the array they were given, so the caller owns index bookkeeping.
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -18,11 +19,24 @@ from .geometry import (
     farthest_first_seeded,
 )
 
-_SCSAMPLER_LOCK = threading.Lock()
+_LEGACY_RNG_LOCK = threading.Lock()
+
+
+@contextmanager
+def _preserve_legacy_rng():
+    # Both upstream libraries seed the same process-wide NumPy RNG.
+    with _LEGACY_RNG_LOCK:
+        saved = np.random.get_state()
+        try:
+            yield
+        finally:
+            np.random.set_state(saved)
+
 
 __all__ = [
     "select_fft",
     "select_scsampler",
+    "select_geosketch",
     "select_random",
     "make_selector",
     "refine",
@@ -61,21 +75,46 @@ def select_scsampler(X: np.ndarray, m: int, rng) -> np.ndarray:
         raise ImportError(
             "scsampler_maximin requires a working scsampler installation"
         ) from exc
-    with _SCSAMPLER_LOCK:
-        saved = np.random.get_state()
-        try:
-            out = upstream.scsampler(
-                np.ascontiguousarray(X, dtype=np.float64),
-                n_obs=m,
-                copy=False,
-                random_split=1,
-                random_state=int(rng.integers(np.iinfo(np.int32).max)),
-            )
-        finally:
-            np.random.set_state(saved)
+    with _preserve_legacy_rng():
+        out = upstream.scsampler(
+            np.ascontiguousarray(X, dtype=np.float64),
+            n_obs=m,
+            copy=False,
+            random_split=1,
+            random_state=int(rng.integers(np.iinfo(np.int32).max)),
+        )
     idx = indices(out, len(X), "scsampler output")
     if idx.size != m:
         raise ValueError(f"scsampler returned {idx.size} indices, expected {m}")
+    return idx
+
+
+def select_geosketch(X: np.ndarray, m: int, rng, *, seed=None) -> np.ndarray:
+    """Sample row positions without replacement using upstream GeoSketch."""
+    try:
+        from geosketch import gs
+    except ImportError as exc:
+        raise ImportError(
+            "GeoSketch requires the 'geosketch' extra (pros-sketch[geosketch])"
+        ) from exc
+    m = min(int(m), len(X))
+    if m <= 0:
+        return np.empty(0, dtype=np.int64)
+    if m == len(X):
+        return np.arange(m, dtype=np.int64)
+    # GeoSketch accepts only 32-bit seeds. For refinement, reuse a compatible
+    # sketch seed verbatim so a direct call on the pool reproduces the sketch.
+    if not isinstance(seed, (int, np.integer)) or not 0 <= seed < 2**32:
+        seed = int(rng.integers(2**32))
+    X = np.ascontiguousarray(X, dtype=np.float64)
+    if np.array_equal(X[0], X[-1]) and np.all(X == X[0]):
+        # One occupied box: gs's range normalization would divide by zero.
+        return np.sort(np.random.default_rng(seed).choice(len(X), m, replace=False))
+    with _preserve_legacy_rng():
+        out = gs(X, m, replace=False, seed=int(seed))
+    idx = indices(out, len(X), "geosketch output")
+    if idx.size != m:
+        raise ValueError(f"geosketch returned {idx.size} indices, expected {m}")
     return idx
 
 
@@ -84,10 +123,13 @@ def make_selector(kind: str):
         return select_fft
     if kind == "scsampler_maximin":
         return select_scsampler
+    if kind == "geosketch":
+        return select_geosketch
     if kind == "random":
         return select_random
     raise ValueError(
-        f"unknown selector {kind!r}; expected 'fft', 'scsampler_maximin', 'random'"
+        f"unknown selector {kind!r}; expected 'fft', 'scsampler_maximin', "
+        "'geosketch', 'random'"
     )
 
 
@@ -236,6 +278,8 @@ def refine(
     max_iter: int = 25,
     mix: float = 0.0,
     mix_seeds: np.ndarray | None = None,
+    *,
+    geosketch_seed: int | None = None,
 ) -> np.ndarray:
     """Stage-2 refinement: choose ``n`` of the pooled candidates ``P``.
 
@@ -255,8 +299,8 @@ def refine(
     mix = float(mix)
     if not 0.0 <= mix <= 1.0:
         raise ValueError(f"mix must be in [0, 1], got {mix}")
-    if kind == "scsampler_maximin" and mix > 0:
-        raise ValueError("scsampler_maximin refinement requires mix=0")
+    if kind in ("scsampler_maximin", "geosketch") and mix > 0:
+        raise ValueError(f"{kind} refinement requires mix=0")
     if mix > 0.0 and kind != "none":
         k = int(round(mix * n))
         if k >= n:
@@ -289,11 +333,13 @@ def refine(
         return farthest_first(P, n, rng=rng)
     if kind == "scsampler_maximin":
         return select_scsampler(P, n, rng)
+    if kind == "geosketch":
+        return select_geosketch(P, n, rng, seed=geosketch_seed)
     if kind == "maximin":
         return maximin_swap(P, farthest_first(P, n, rng=rng), max_iter=max_iter)
     if kind == "local_swap":
         return kcenter_local_search(P, farthest_first(P, n, rng=rng), max_iter=max_iter)
     raise ValueError(
         f"unknown refiner {kind!r}; expected 'fft', 'scsampler_maximin', "
-        "'maximin', 'local_swap', 'none'"
+        "'geosketch', 'maximin', 'local_swap', 'none'"
     )
